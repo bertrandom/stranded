@@ -33,6 +33,7 @@ struct TConfig {
     int nightStart;     // in minutes after midnight
     int nightEnd;       // in minutes after midnight
     int cec;            // also put the TV in standby via HDMI-CEC
+    long long runningSince;  // Unix time the running timer counts from
 };
 
 extern struct TConfig cfg;
@@ -43,3 +44,4 @@ void cfgUnlock();
 void cfgSave();
 void cfgApply();
 int  cfgParseTime(char *str);
+void cfgResetRunningSince();

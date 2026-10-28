@@ -67,6 +67,8 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   }
   .times { display: flex; gap: 8px; align-items: center; }
+  .timer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .elapsed { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .night-state { margin: 12px 0 0; color: var(--muted); font-size: .9rem; }
   #toast {
     position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
@@ -81,6 +83,17 @@
 <main>
   <h1>Johnny Castaway</h1>
   <p class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></p>
+
+  <section>
+    <h2>Running for</h2>
+    <div class="timer">
+      <div>
+        <div class="elapsed" id="elapsed">–</div>
+        <div class="hint" id="since"></div>
+      </div>
+      <button data-action="reset-timer" data-confirm="Reset the timer to zero?">Reset</button>
+    </div>
+  </section>
 
   <section>
     <h2>Playback</h2>
@@ -155,7 +168,33 @@
     toastTimer = setTimeout(() => el.className = '', 1800);
   }
 
+  // The timer ticks locally between status updates. clockOffset corrects
+  // for a difference between this device's clock and the Pi's
+  let runningSince = null;
+  let clockOffset = 0;
+
+  function formatElapsed(seconds) {
+    seconds = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(seconds / 86400);
+    const pad = (n) => String(n).padStart(2, '0');
+    const clock = `${pad(Math.floor(seconds / 3600) % 24)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`;
+    return days ? `${days}d ${clock}` : clock;
+  }
+
+  function tick() {
+    if (runningSince === null) return;
+    $('elapsed').textContent = formatElapsed(Date.now() / 1000 + clockOffset - runningSince);
+  }
+
   function render(s) {
+    if (s.runningSince !== runningSince) {
+      $('since').textContent = 'Since ' + new Date(s.runningSince * 1000).toLocaleString(undefined,
+        { dateStyle: 'medium', timeStyle: 'short' });
+    }
+    runningSince = s.runningSince;
+    clockOffset = s.now - Date.now() / 1000;
+    tick();
+
     const state = s.asleep ? 'asleep' : s.paused ? 'paused' : 'playing';
     $('dot').className = 'dot ' + state;
     $('status').textContent = { asleep: 'Display off', paused: 'Paused', playing: 'Playing' }[state]
@@ -235,6 +274,7 @@
 
   refresh();
   setInterval(refresh, 2000);
+  setInterval(tick, 250);   // often enough that no second is skipped
 </script>
 </body>
 </html>

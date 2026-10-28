@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <SDL2/SDL.h>
 #include "mytypes.h"
@@ -121,6 +122,9 @@ static void cfgFileRead()
 
         else if (strstr(buf, "cec=") == buf)
             cfg.cec = atoi(buf + 4) != 0;
+
+        else if (strstr(buf, "runningSince=") == buf)
+            cfg.runningSince = atoll(buf + 13);
     }
 
     fclose(f);
@@ -142,8 +146,14 @@ void cfgInit()
     cfg.nightStart = 22 * 60;
     cfg.nightEnd   = 8 * 60;
     cfg.cec        = 1;
+    cfg.runningSince = 0;
 
     cfgFileRead();
+
+    // First start: the running timer starts now
+    if (cfg.runningSince <= 0)
+        cfgResetRunningSince();
+
     cfgApply();
 }
 
@@ -177,6 +187,7 @@ void cfgSave()
         fprintf(f, "nightStart=%02d:%02d\n", cfg.nightStart / 60, cfg.nightStart % 60);
         fprintf(f, "nightEnd=%02d:%02d\n", cfg.nightEnd / 60, cfg.nightEnd % 60);
         fprintf(f, "cec=%d\n", cfg.cec);
+        fprintf(f, "runningSince=%lld\n", cfg.runningSince);
         fclose(f);
     }
 }
@@ -189,5 +200,15 @@ void cfgApply()
     evHotKeysEnabled = cfg.hotkeys;
     debugMode        = cfg.debug;
     soundMuted       = !cfg.sound;
+    cfgUnlock();
+}
+
+
+// Restart the running timer from now
+void cfgResetRunningSince()
+{
+    cfgLock();
+    cfg.runningSince = (long long) time(NULL);
+    cfgSave();
     cfgUnlock();
 }
