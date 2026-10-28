@@ -117,6 +117,7 @@ void nightEnter()
 {
     fprintf(stderr, "Night mode: turning the display off\n");
     nightAsleep = 1;
+    cfgCountRunningTime(0);
 
     grDisplayOff();
 
@@ -134,4 +135,6 @@ void nightLeave()
         nightCec(1);
 
     grDisplayOn();
+
+    cfgCountRunningTime(1);
 }

@@ -40,6 +40,7 @@ struct TConfig cfg;
 static SDL_mutex *cfgMutex = NULL;
 
 static uint32 runningTicks = 0;      // when cfg.runningTime was last updated
+static int    runningCounted = 1;    // 0 while the display is off
 static uint32 lastSaveTicks = 0;
 
 #define RUNNING_TIME_SAVE_DELAY 60000   // ms
@@ -211,6 +212,9 @@ void cfgApply()
 // the remainder is kept for the next update
 static void cfgUpdateRunningTime()
 {
+    if (!runningCounted)
+        return;
+
     uint32 seconds = (SDL_GetTicks() - runningTicks) / 1000;
 
     cfg.runningTime += seconds;
@@ -242,6 +246,19 @@ void cfgSaveRunningTime(int force)
     cfgUpdateRunningTime();
     cfgSave();
     lastSaveTicks = SDL_GetTicks();
+    cfgUnlock();
+}
+
+
+// The running timer only counts while Johnny is on screen: it's stopped
+// while night mode has the display off
+void cfgCountRunningTime(int counted)
+{
+    cfgLock();
+    cfgUpdateRunningTime();
+    runningCounted = counted;
+    runningTicks = SDL_GetTicks();
+    cfgSave();
     cfgUnlock();
 }
 
