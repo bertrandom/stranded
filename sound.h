@@ -22,6 +22,7 @@
  */
 
 extern int soundDisabled;
+extern int soundMuted;
 
 void soundInit();
 void soundEnd();

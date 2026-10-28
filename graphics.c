@@ -22,9 +22,17 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_syswm.h>
+
+#if defined(HAVE_LIBDRM) && defined(SDL_VIDEO_DRIVER_KMSDRM)
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#define USE_DPMS
+#endif
 
 #include "mytypes.h"
 #include "utils.h"
@@ -38,6 +46,8 @@ static SDL_Window *sdl_window;
 static uint8 ttmPalette[16][4];
 
 static SDL_Surface *grSavedZonesLayer = NULL;
+
+static SDL_Surface *grSavedScreen = NULL;
 
 static SDL_Rect grScreenOrigin = { 0, 0, 0, 0 };   // TODO
 
@@ -166,6 +176,84 @@ void grToggleFullScreen()
     else {
         SDL_SetWindowFullscreen(sdl_window, SDL_WINDOW_FULLSCREEN);
         SDL_ShowCursor(SDL_DISABLE);
+    }
+
+    SDL_UpdateWindowSurface(sdl_window);
+}
+
+
+// Switch the monitor's power on or off. Only possible when SDL draws
+// directly through KMS/DRM, ie. not in a window under X11 or Wayland
+static void grSetDpms(int on)
+{
+#ifdef USE_DPMS
+    SDL_SysWMinfo info;
+
+    SDL_VERSION(&info.version);
+
+    if (!SDL_GetWindowWMInfo(sdl_window, &info)
+            || info.subsystem != SDL_SYSWM_KMSDRM)
+        return;
+
+    int fd = info.info.kmsdrm.drm_fd;
+    drmModeRes *resources = drmModeGetResources(fd);
+
+    if (resources == NULL)
+        return;
+
+    for (int i=0; i < resources->count_connectors; i++) {
+
+        drmModeConnector *connector = drmModeGetConnector(fd, resources->connectors[i]);
+
+        if (connector == NULL)
+            continue;
+
+        if (connector->connection == DRM_MODE_CONNECTED) {
+
+            for (int j=0; j < connector->count_props; j++) {
+
+                drmModePropertyRes *prop = drmModeGetProperty(fd, connector->props[j]);
+
+                if (prop != NULL && !strcmp(prop->name, "DPMS")) {
+                    if (drmModeConnectorSetProperty(fd, connector->connector_id, prop->prop_id,
+                            on ? DRM_MODE_DPMS_ON : DRM_MODE_DPMS_OFF))
+                        fprintf(stderr, "Couldn't set DPMS on connector %d\n", connector->connector_id);
+                }
+
+                drmModeFreeProperty(prop);
+            }
+        }
+
+        drmModeFreeConnector(connector);
+    }
+
+    drmModeFreeResources(resources);
+#endif
+}
+
+
+// Black out the screen and power the monitor off, keeping a copy of the
+// current picture to restore it later
+void grDisplayOff()
+{
+    SDL_Surface *sfc = SDL_GetWindowSurface(sdl_window);
+
+    grSavedScreen = SDL_ConvertSurface(sfc, sfc->format, 0);
+    SDL_FillRect(sfc, NULL, SDL_MapRGB(sfc->format, 0, 0, 0));
+    SDL_UpdateWindowSurface(sdl_window);
+
+    grSetDpms(0);
+}
+
+
+void grDisplayOn()
+{
+    grSetDpms(1);
+
+    if (grSavedScreen != NULL) {
+        SDL_BlitSurface(grSavedScreen, NULL, SDL_GetWindowSurface(sdl_window), NULL);
+        SDL_FreeSurface(grSavedScreen);
+        grSavedScreen = NULL;
     }
 
     SDL_UpdateWindowSurface(sdl_window);

@@ -22,7 +22,24 @@
  */
 
 extern int evHotKeysEnabled;
+extern int evPaused;
+extern int evMaxSpeed;
+
+// Actions which can be triggered from another thread (eg. the web server)
+enum {
+    EV_ACTION_PAUSE,
+    EV_ACTION_RESUME,
+    EV_ACTION_TOGGLE_PAUSE,
+    EV_ACTION_STEP,
+    EV_ACTION_TOGGLE_MAXSPEED,
+    EV_ACTION_TOGGLE_FULLSCREEN,
+    EV_ACTION_QUIT,
+    EV_ACTION_SLEEP,
+    EV_ACTION_WAKE,
+    EV_ACTION_AUTO,
+    EV_ACTION_SETTINGS
+};
 
 void eventsInit();
 void eventsWaitTick(uint16 delay);
-
+void eventsPushAction(int action);

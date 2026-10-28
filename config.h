@@ -21,14 +21,25 @@
  *
  */
 
-
 #define CFG_FILENAME ".jc_reborn"
 
 struct TConfig {
     int currentDay;
     int date;
+    int sound;          // play sounds (if audio could be initialized)
+    int hotkeys;        // enable hot keys
+    int debug;          // print debug info - not saved
+    int nightMode;      // turn the display off during night hours
+    int nightStart;     // in minutes after midnight
+    int nightEnd;       // in minutes after midnight
+    int cec;            // also put the TV in standby via HDMI-CEC
 };
 
-void cfgFileWrite(struct TConfig *cfg);
-void cfgFileRead(struct TConfig *cfg);
+extern struct TConfig cfg;
 
+void cfgInit();
+void cfgLock();
+void cfgUnlock();
+void cfgSave();
+void cfgApply();
+int  cfgParseTime(char *str);

@@ -35,6 +35,8 @@
 #include "ttm.h"
 #include "ads.h"
 #include "story.h"
+#include "config.h"
+#include "web.h"
 
 
 static int  argDump     = 0;
@@ -66,6 +68,8 @@ static void usage()
         printf("         island     - display the island as background for ADS play\n");
         printf("         debug      - print some debug info on stdout\n");
         printf("         hotkeys    - enable hot keys\n");
+        printf("         web        - run a settings page and API on port %d\n", WEB_DEFAULT_PORT);
+        printf("         port <n>   - run the web server on port <n> instead\n");
         printf("\n");
         printf(" While-playing hot-keys (if enabled):\n");
         printf("         Esc        - Terminate immediately\n");
@@ -73,6 +77,9 @@ static void usage()
         printf("         Space      - Toggle pause / unpause\n");
         printf("         Return     - When paused, advance one frame\n");
         printf("         <M>        - toggle max / normal speed\n");
+        printf("\n");
+        printf(" Settings changed from the web page are saved in ~/%s and\n", CFG_FILENAME);
+        printf(" take precedence over the options above.\n");
         printf("\n");
         exit(1);
 }
@@ -135,6 +142,14 @@ static void parseArgs(int argc, char **argv)
             else if (!strcmp(argv[i], "hotkeys")) {
                 evHotKeysEnabled = 1;
             }
+            else if (!strcmp(argv[i], "web")) {
+                if (!webPort)
+                    webPort = WEB_DEFAULT_PORT;
+            }
+            else if (!strcmp(argv[i], "port")) {
+                if (i + 1 >= argc || (webPort = atoi(argv[++i])) <= 0)
+                    usage();
+            }
         }
     }
 
@@ -156,11 +171,14 @@ int main(int argc, char **argv)
     if (argDump)
         debugMode = 1;
 
+    cfgInit();
+
     parseResourceFiles("RESOURCE.MAP");
 
     if (argPlayAll) {
         graphicsInit();
         soundInit();
+        webInit();
 
         storyPlay();
 
@@ -181,6 +199,7 @@ int main(int argc, char **argv)
     else if (argTtm) {
         graphicsInit();
         soundInit();
+        webInit();
 
         adsPlaySingleTtm(args[0]);
 
@@ -192,6 +211,7 @@ int main(int argc, char **argv)
 
         graphicsInit();
         soundInit();
+        webInit();
 
         if (argIsland)
             adsInitIsland();

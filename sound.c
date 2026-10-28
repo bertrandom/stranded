@@ -39,6 +39,7 @@ struct TSound {
 
 
 int soundDisabled = 0;
+int soundMuted    = 0;
 
 
 static struct TSound sounds[NUM_OF_SOUNDS];
@@ -120,7 +121,7 @@ void soundEnd()
 
 void soundPlay(int nb)
 {
-    if (soundDisabled)
+    if (soundDisabled || soundMuted)
         return;
 
     if (nb < 0 || NUM_OF_SOUNDS <= nb) {

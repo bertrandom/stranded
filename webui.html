@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Johnny Castaway</title>
+<style>
+  :root {
+    --bg: #f4efe4;
+    --card: #fffdf8;
+    --text: #2b2a26;
+    --muted: #6f6a5f;
+    --border: #e2dac8;
+    --accent: #1f7a8c;
+    --accent-text: #ffffff;
+    --danger: #b3412e;
+    --ok: #3b8a4a;
+    --night: #4b4f8f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --card: #20232a;
+      --text: #ece9e1;
+      --muted: #9b978d;
+      --border: #333741;
+      --accent: #4fb3c8;
+      --accent-text: #0e1114;
+      --danger: #e0715e;
+      --ok: #6cc07a;
+      --night: #9a9ee6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1rem; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .status { color: var(--muted); margin: 0 0 20px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.playing { background: var(--ok); }
+  .dot.paused { background: #d39b2a; }
+  .dot.asleep { background: var(--night); }
+  .dot.offline { background: var(--danger); }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+  .row:first-of-type { border-top: none; padding-top: 0; }
+  .row label { flex: 1; }
+  .hint { display: block; color: var(--muted); font-size: .85rem; }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+  input[type=time], select {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+  }
+  .times { display: flex; gap: 8px; align-items: center; }
+  .night-state { margin: 12px 0 0; color: var(--muted); font-size: .9rem; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; font-size: .9rem;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { background: var(--danger); color: #fff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Johnny Castaway</h1>
+  <p class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></p>
+
+  <section>
+    <h2>Playback</h2>
+    <div class="buttons">
+      <button class="primary" id="pause" data-action="toggle-pause">Pause</button>
+      <button id="step" data-action="step" title="Advance one frame while paused">Step</button>
+      <button id="maxspeed" data-action="toggle-maxspeed">Max speed</button>
+      <button id="fullscreen" data-action="toggle-fullscreen">Windowed</button>
+      <button class="danger" data-action="quit" data-confirm="Quit jc_reborn? If it runs as a service it will restart.">Quit</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Night mode</h2>
+    <div class="row">
+      <label for="nightMode">Turn the display off at night</label>
+      <input type="checkbox" id="nightMode" data-setting="nightMode">
+    </div>
+    <div class="row">
+      <label>Night hours</label>
+      <span class="times">
+        <input type="time" id="nightStart" data-setting="nightStart" aria-label="Night starts">
+        <span>to</span>
+        <input type="time" id="nightEnd" data-setting="nightEnd" aria-label="Night ends">
+      </span>
+    </div>
+    <div class="row">
+      <label for="cec">Put the TV in standby too<span class="hint">Uses HDMI-CEC, if the TV supports it</span></label>
+      <input type="checkbox" id="cec" data-setting="cec">
+    </div>
+    <div class="buttons" style="margin-top: 12px">
+      <button data-action="sleep">Display off now</button>
+      <button data-action="wake">Display on now</button>
+      <button id="auto" data-action="auto">Follow schedule</button>
+    </div>
+    <p class="night-state" id="nightState"></p>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <div class="row">
+      <label for="storyDay">Day of the story<span class="hint">Advances by one each day; takes effect at the next scene</span></label>
+      <select id="storyDay" data-setting="storyDay"></select>
+    </div>
+    <div class="row">
+      <label for="sound">Sound</label>
+      <input type="checkbox" id="sound" data-setting="sound">
+    </div>
+    <div class="row">
+      <label for="hotkeys">Hot keys<span class="hint">When off, any key press quits</span></label>
+      <input type="checkbox" id="hotkeys" data-setting="hotkeys">
+    </div>
+    <div class="row">
+      <label for="debug">Debug output<span class="hint">Not saved across restarts</span></label>
+      <input type="checkbox" id="debug" data-setting="debug">
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const storyDay = $('storyDay');
+  for (let day = 1; day <= 11; day++) storyDay.add(new Option(day, day));
+
+  let toastTimer;
+  function toast(message, isError) {
+    const el = $('toast');
+    el.textContent = message;
+    el.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.className = '', 1800);
+  }
+
+  function render(s) {
+    const state = s.asleep ? 'asleep' : s.paused ? 'paused' : 'playing';
+    $('dot').className = 'dot ' + state;
+    $('status').textContent = { asleep: 'Display off', paused: 'Paused', playing: 'Playing' }[state]
+      + (s.maxSpeed && !s.asleep ? ' at max speed' : '');
+
+    $('pause').textContent = s.paused ? 'Resume' : 'Pause';
+    $('step').disabled = !s.paused;
+    $('maxspeed').textContent = s.maxSpeed ? 'Normal speed' : 'Max speed';
+    $('fullscreen').textContent = s.fullscreen ? 'Windowed' : 'Full screen';
+    $('auto').disabled = s.nightOverride === 'auto';
+
+    const settings = s.settings;
+    for (const el of document.querySelectorAll('[data-setting]')) {
+      if (el === document.activeElement) continue;   // don't fight the user
+      const value = settings[el.dataset.setting];
+      if (el.type === 'checkbox') el.checked = value;
+      else el.value = value;
+    }
+    $('sound').disabled = !s.soundAvailable;
+
+    let night;
+    if (s.nightOverride === 'sleep') night = 'Display turned off by hand until the next scheduled switch.';
+    else if (s.nightOverride === 'wake') night = 'Display turned on by hand until the next scheduled switch.';
+    else if (!settings.nightMode) night = 'Night mode is off.';
+    else night = s.nightScheduled
+      ? `Night time: display off until ${settings.nightEnd}.`
+      : `Display turns off at ${settings.nightStart}.`;
+    $('nightState').textContent = night;
+  }
+
+  async function call(path, options) {
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    return data;
+  }
+
+  async function refresh() {
+    try {
+      render(await call('/api/status'));
+    } catch (e) {
+      $('dot').className = 'dot offline';
+      $('status').textContent = 'Not responding';
+    }
+  }
+
+  for (const button of document.querySelectorAll('[data-action]')) {
+    button.addEventListener('click', async () => {
+      if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
+      try {
+        const result = await call('/api/' + button.dataset.action, { method: 'POST' });
+        if (result.settings) render(result);
+        else toast('Done');
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+  }
+
+  for (const el of document.querySelectorAll('[data-setting]')) {
+    el.addEventListener('change', async () => {
+      const value = el.type === 'checkbox' ? el.checked : el.value;
+      if (value === '') return;
+      try {
+        render(await call('/api/settings', {
+          method: 'POST',
+          body: new URLSearchParams({ [el.dataset.setting]: value }),
+        }));
+        el.blur();
+        toast('Saved');
+      } catch (e) {
+        toast(e.message, true);
+        refresh();
+      }
+    });
+  }
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

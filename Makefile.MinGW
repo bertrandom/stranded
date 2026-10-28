@@ -22,7 +22,9 @@ OBJ =   jc_reborn.o \
         graphics.o \
         sound.o \
         events.o \
-        config.o
+        config.o \
+        night.o \
+        web.o
 
 
 all: $(EXE)

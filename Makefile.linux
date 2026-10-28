@@ -1,7 +1,13 @@
 
-CFLAGS=-Wall -Wpedantic -std=c99
+CFLAGS=-Wall -Wpedantic -std=c99 -I$(shell pkg-config --variable=includedir sdl2) $(shell pkg-config --cflags sdl2)
 
-LDLIBS=-lSDL2
+LDLIBS=$(shell pkg-config --libs sdl2)
+
+# libdrm is used to power the monitor off in night mode
+ifeq ($(shell pkg-config --exists libdrm && echo yes),yes)
+CFLAGS += -DHAVE_LIBDRM $(shell pkg-config --cflags libdrm)
+LDLIBS += $(shell pkg-config --libs libdrm)
+endif
 
 EXE =   jc_reborn
 
@@ -20,7 +26,9 @@ OBJ =   jc_reborn.o \
         graphics.o \
         sound.o \
         events.o \
-        config.o
+        config.o \
+        night.o \
+        web.o
 
 
 all: $(EXE)

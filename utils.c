@@ -214,6 +214,17 @@ int getHour()
 }
 
 
+int getMinutesOfDay()
+{
+    struct timeval tv;
+    struct tm *localTime;
+
+    gettimeofday(&tv, NULL);
+    localTime = localtime(&tv.tv_sec);
+    return localTime->tm_hour * 60 + localTime->tm_min;
+}
+
+
 char *getMonthAndDay()
 {
     struct timeval tv;

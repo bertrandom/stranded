@@ -82,6 +82,8 @@ void graphicsInit();
 void graphicsEnd();
 void grRefreshDisplay();
 void grToggleFullScreen();
+void grDisplayOff();
+void grDisplayOn();
 void grUpdateDisplay(struct TTtmThread *ttmBackgroundThread,
                      struct TTtmThread *ttmThreads,
                      struct TTtmThread *ttmHolidayThreads);

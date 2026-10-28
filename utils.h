@@ -42,5 +42,6 @@ void   peekUint16Block(uint8 *data, uint32 *offset, uint16 *dest, int len);
 void   hexdump(uint8 *data, uint32 len);
 int    getDayOfYear();
 int    getHour();
+int    getMinutesOfDay();
 char   *getMonthAndDay();
 

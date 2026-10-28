@@ -27,15 +27,78 @@
 #include <SDL2/SDL.h>
 #include "mytypes.h"
 #include "graphics.h"
+#include "config.h"
+#include "night.h"
 #include "events.h"
 
 
 static uint32 lastTicks = 0x00ffffff;
-static int paused   = 0;
-static int maxSpeed = 0;
 static int oneFrame = 0;
+static uint32 evActionEventType = (uint32) -1;
 
 int evHotKeysEnabled = 0;
+int evPaused   = 0;
+int evMaxSpeed = 0;
+
+
+static void eventsQuit()
+{
+    graphicsEnd();
+    exit(255);
+}
+
+
+static void eventsDoAction(int action)
+{
+    switch (action) {
+
+        case EV_ACTION_PAUSE:
+            evPaused = 1;
+            break;
+
+        case EV_ACTION_RESUME:
+            evPaused = 0;
+            break;
+
+        case EV_ACTION_TOGGLE_PAUSE:
+            evPaused = !evPaused;
+            break;
+
+        case EV_ACTION_STEP:
+            oneFrame = 1;
+            break;
+
+        case EV_ACTION_TOGGLE_MAXSPEED:
+            evMaxSpeed = !evMaxSpeed;
+            break;
+
+        case EV_ACTION_TOGGLE_FULLSCREEN:
+            grToggleFullScreen();
+            oneFrame = 1;   // to redraw the window // TODO
+            break;
+
+        case EV_ACTION_QUIT:
+            eventsQuit();
+            break;
+
+        case EV_ACTION_SLEEP:
+            nightSetOverride(NIGHT_FORCE_SLEEP);
+            break;
+
+        case EV_ACTION_WAKE:
+            nightSetOverride(NIGHT_FORCE_WAKE);
+            break;
+
+        case EV_ACTION_AUTO:
+            nightSetOverride(NIGHT_AUTO);
+            break;
+
+        case EV_ACTION_SETTINGS:
+            cfgApply();
+            nightScheduleChanged();
+            break;
+    }
+}
 
 
 static void eventsProcessEvents()
@@ -43,6 +106,11 @@ static void eventsProcessEvents()
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
+
+        if (event.type == evActionEventType) {
+            eventsDoAction(event.user.code);
+            continue;
+        }
 
         switch(event.type) {
 
@@ -53,34 +121,29 @@ static void eventsProcessEvents()
                     switch (event.key.keysym.sym) {
 
                         case SDLK_SPACE:
-                            paused = !paused;
+                            eventsDoAction(EV_ACTION_TOGGLE_PAUSE);
                             break;
 
                         case SDLK_m:
-                            maxSpeed = !maxSpeed;
+                            eventsDoAction(EV_ACTION_TOGGLE_MAXSPEED);
                             break;
 
                         case SDLK_RETURN:
-                            if (event.key.keysym.mod & KMOD_LALT) {
-                                grToggleFullScreen();
-                                oneFrame = 1;   // to redraw the window // TODO
-                            }
-                            else {
-                                oneFrame = 1;
-                            }
+                            if (event.key.keysym.mod & KMOD_LALT)
+                                eventsDoAction(EV_ACTION_TOGGLE_FULLSCREEN);
+                            else
+                                eventsDoAction(EV_ACTION_STEP);
                             break;
 
                         case SDLK_ESCAPE:
-                            graphicsEnd();
-                            exit(255);
+                            eventsQuit();
                             break;
                     }
                 }
                 else {
                     // Normal behaviour : no hot keys, the screen saver
                     // terminates if any key is pressed
-                    graphicsEnd();
-                    exit(255);
+                    eventsQuit();
                 }
                 break;
 
@@ -89,16 +152,29 @@ static void eventsProcessEvents()
                 break;
 
             case SDL_QUIT:
-                graphicsEnd();
-                exit(255);
+                eventsQuit();
                 break;
         }
     }
 }
 
 
+static void eventsSleepDuringNight()
+{
+    nightEnter();
+
+    while (nightShouldSleep()) {
+        SDL_Delay(100);
+        eventsProcessEvents();
+    }
+
+    nightLeave();
+}
+
+
 void eventsInit()
 {
+    evActionEventType = SDL_RegisterEvents(1);
     lastTicks = SDL_GetTicks();
 }
 
@@ -110,8 +186,17 @@ void eventsWaitTick(uint16 delay)
 
     eventsProcessEvents();
 
-    while ((paused && !oneFrame)
-            || (!maxSpeed && (SDL_GetTicks() - lastTicks < delay))) {
+    while (1) {
+
+        if (nightShouldSleep()) {
+            eventsSleepDuringNight();
+            lastTicks = SDL_GetTicks() - delay;  // no need to wait any longer
+        }
+
+        if (!((evPaused && !oneFrame)
+               || (!evMaxSpeed && (SDL_GetTicks() - lastTicks < delay))))
+            break;
+
         SDL_Delay(5);
         eventsProcessEvents();
     }
@@ -119,3 +204,17 @@ void eventsWaitTick(uint16 delay)
     lastTicks = SDL_GetTicks();
 }
 
+
+// Thread-safe: the action is performed by the main thread
+void eventsPushAction(int action)
+{
+    SDL_Event event;
+
+    if (evActionEventType == (uint32) -1)
+        return;
+
+    SDL_zero(event);
+    event.type      = evActionEventType;
+    event.user.code = action;
+    SDL_PushEvent(&event);
+}

@@ -49,7 +49,65 @@ All files must be copied in the same directory as the `jc_reborn` executable.
 
 By default, the engine runs full screen and plays the life of Johnny on his island, as the original did.
 
+To control it from a browser or turn the display off at night, see [Web control and night mode](#web-control-and-night-mode) below.
+
 But, if you're curious about how the engine works, you may type `jc_reborn help` and see the different options available. Feel free to try them and explore the inner workings of Screen Antics !
+
+
+## Web control and night mode
+
+Run with the `web` option to start a small web server on port 80 (or `port <n>` to pick another port):
+
+    jc_reborn hotkeys web
+
+Open `http://<host>/` for a settings page. It serves `webui.html` from the current directory, so keep that file next to the `jc_reborn` executable. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
+
+There is no authentication: anyone who can reach the port can change the settings or quit. Only use it on a network you trust.
+
+### Night mode
+
+When night mode is on, Johnny pauses during the night hours (22:00 to 08:00 by default) and the display is turned off:
+
+  - the screen is blacked out;
+  - when drawing directly through KMS/DRM (no desktop), the monitor is powered off with DPMS. This needs `libdrm` at build time, and is detected automatically by `Makefile.linux`;
+  - optionally, a TV is put in standby with HDMI-CEC, using `cec-ctl` (from `v4l-utils`) on `/dev/cec0`.
+
+In the morning, the display comes back on and Johnny picks up where he left off. The display can also be turned off or on by hand; that lasts until the next scheduled switch.
+
+### Settings
+
+Settings changed from the web page are saved in `~/.jc_reborn`, next to the story progress, and take precedence over the command line options at the next start.
+
+| Setting      | Values           | Meaning |
+| -------------|------------------|---------|
+| `storyDay`   | 1 to 11          | Day of the story. It normally advances by one each day; a new value takes effect at the next scene |
+| `sound`      | `true` / `false` | Play sounds. Without effect if started with `nosound` |
+| `hotkeys`    | `true` / `false` | Enable hot keys. When off, any key press quits |
+| `debug`      | `true` / `false` | Print debug info. Not saved |
+| `nightMode`  | `true` / `false` | Turn the display off during night hours |
+| `nightStart` | `HH:MM`          | Start of the night, local time |
+| `nightEnd`   | `HH:MM`          | End of the night, local time |
+| `cec`        | `true` / `false` | Also put the TV in standby with HDMI-CEC |
+
+### API
+
+| Request | Effect |
+| --------|--------|
+| `GET /api/status` | Current state and settings, as JSON |
+| `POST /api/settings` | Change one or more settings. Body: form-encoded, eg. `nightMode=true&nightStart=22:00`. Either all of them are applied or, on error, none |
+| `POST /api/pause`, `POST /api/resume`, `POST /api/toggle-pause` | Pause or resume (hot key: Space) |
+| `POST /api/step` | When paused, advance one frame (hot key: Return) |
+| `POST /api/toggle-maxspeed` | Toggle max / normal speed (hot key: M) |
+| `POST /api/toggle-fullscreen` | Toggle full screen / windowed mode (hot key: Alt+Return) |
+| `POST /api/quit` | Terminate (hot key: Esc) |
+| `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
+| `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
+
+Every request except `quit` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
+
+    curl http://pijohnny/api/status
+    curl -d nightMode=true -d nightStart=22:00 -d nightEnd=08:00 http://pijohnny/api/settings
+    curl -X POST http://pijohnny/api/toggle-pause
 
 
 ## Current status

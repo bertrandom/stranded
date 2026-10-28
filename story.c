@@ -64,29 +64,30 @@ static struct TStoryScene *storyPickScene(
 
 static void storyUpdateCurrentDay()
 {
-    struct TConfig config;
     int today;
     int hasChanged = 0;
 
-    cfgFileRead(&config);
+    cfgLock();
     today = getDayOfYear();
 
-    if (today != config.date) {
+    if (today != cfg.date) {
         debugMsg("System date has changed since last sequence -> next day of the story");
-        config.date = today;
-        config.currentDay += 1;
+        cfg.date = today;
+        cfg.currentDay += 1;
         hasChanged = 1;
     }
 
-    if (config.currentDay < 1 || config.currentDay > 11) {
-        config.currentDay = 1;
+    if (cfg.currentDay < 1 || cfg.currentDay > 11) {
+        cfg.currentDay = 1;
         hasChanged = 1;
     }
 
     if (hasChanged)
-        cfgFileWrite(&config);
+        cfgSave();
 
-    storyCurrentDay = config.currentDay;
+    storyCurrentDay = cfg.currentDay;
+    cfgUnlock();
+
     debugMsg("The day of the story is: %d", storyCurrentDay);
 }
 
@@ -198,6 +199,7 @@ void storyPlay()
 
 
     adsInit();
+    storyUpdateCurrentDay();    // so that the day is known during the intro
     adsPlayIntro();
 
     while (1) {
