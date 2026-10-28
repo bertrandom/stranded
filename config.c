@@ -24,7 +24,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include <SDL2/SDL.h>
 #include "mytypes.h"
@@ -39,6 +38,11 @@
 struct TConfig cfg;
 
 static SDL_mutex *cfgMutex = NULL;
+
+static uint32 runningTicks = 0;      // when cfg.runningTime was last updated
+static uint32 lastSaveTicks = 0;
+
+#define RUNNING_TIME_SAVE_DELAY 60000   // ms
 
 
 static char *cfgFullPath()
@@ -123,8 +127,8 @@ static void cfgFileRead()
         else if (strstr(buf, "cec=") == buf)
             cfg.cec = atoi(buf + 4) != 0;
 
-        else if (strstr(buf, "runningSince=") == buf)
-            cfg.runningSince = atoll(buf + 13);
+        else if (strstr(buf, "runningTime=") == buf)
+            cfg.runningTime = atoll(buf + 12);
     }
 
     fclose(f);
@@ -146,13 +150,11 @@ void cfgInit()
     cfg.nightStart = 22 * 60;
     cfg.nightEnd   = 8 * 60;
     cfg.cec        = 1;
-    cfg.runningSince = 0;
+    cfg.runningTime = 0;
 
     cfgFileRead();
 
-    // First start: the running timer starts now
-    if (cfg.runningSince <= 0)
-        cfgResetRunningSince();
+    runningTicks = lastSaveTicks = SDL_GetTicks();
 
     cfgApply();
 }
@@ -187,7 +189,7 @@ void cfgSave()
         fprintf(f, "nightStart=%02d:%02d\n", cfg.nightStart / 60, cfg.nightStart % 60);
         fprintf(f, "nightEnd=%02d:%02d\n", cfg.nightEnd / 60, cfg.nightEnd % 60);
         fprintf(f, "cec=%d\n", cfg.cec);
-        fprintf(f, "runningSince=%lld\n", cfg.runningSince);
+        fprintf(f, "runningTime=%lld\n", cfg.runningTime);
         fclose(f);
     }
 }
@@ -204,11 +206,51 @@ void cfgApply()
 }
 
 
-// Restart the running timer from now
-void cfgResetRunningSince()
+
+// Must be called with the config locked. Only whole seconds are added,
+// the remainder is kept for the next update
+static void cfgUpdateRunningTime()
+{
+    uint32 seconds = (SDL_GetTicks() - runningTicks) / 1000;
+
+    cfg.runningTime += seconds;
+    runningTicks    += seconds * 1000;
+}
+
+
+long long cfgGetRunningTime()
+{
+    long long result;
+
+    cfgLock();
+    cfgUpdateRunningTime();
+    result = cfg.runningTime;
+    cfgUnlock();
+
+    return result;
+}
+
+
+// Saved once a minute, and when quitting, so that at most a minute is lost
+// if the program is killed
+void cfgSaveRunningTime(int force)
+{
+    if (!force && SDL_GetTicks() - lastSaveTicks < RUNNING_TIME_SAVE_DELAY)
+        return;
+
+    cfgLock();
+    cfgUpdateRunningTime();
+    cfgSave();
+    lastSaveTicks = SDL_GetTicks();
+    cfgUnlock();
+}
+
+
+void cfgResetRunningTime()
 {
     cfgLock();
-    cfg.runningSince = (long long) time(NULL);
+    cfg.runningTime = 0;
+    runningTicks = SDL_GetTicks();
     cfgSave();
     cfgUnlock();
 }

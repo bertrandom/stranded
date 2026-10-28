@@ -89,7 +89,7 @@
     <div class="timer">
       <div>
         <div class="elapsed" id="elapsed">–</div>
-        <div class="hint" id="since"></div>
+        <div class="hint">Only counts while jc_reborn is running</div>
       </div>
       <button data-action="reset-timer" data-confirm="Reset the timer to zero?">Reset</button>
     </div>
@@ -168,10 +168,9 @@
     toastTimer = setTimeout(() => el.className = '', 1800);
   }
 
-  // The timer ticks locally between status updates. clockOffset corrects
-  // for a difference between this device's clock and the Pi's
-  let runningSince = null;
-  let clockOffset = 0;
+  // The timer ticks locally between status updates
+  let runningTime = null;
+  let runningTimeAt = 0;
 
   function formatElapsed(seconds) {
     seconds = Math.max(0, Math.floor(seconds));
@@ -182,17 +181,13 @@
   }
 
   function tick() {
-    if (runningSince === null) return;
-    $('elapsed').textContent = formatElapsed(Date.now() / 1000 + clockOffset - runningSince);
+    if (runningTime === null) return;
+    $('elapsed').textContent = formatElapsed(runningTime + (Date.now() - runningTimeAt) / 1000);
   }
 
   function render(s) {
-    if (s.runningSince !== runningSince) {
-      $('since').textContent = 'Since ' + new Date(s.runningSince * 1000).toLocaleString(undefined,
-        { dateStyle: 'medium', timeStyle: 'short' });
-    }
-    runningSince = s.runningSince;
-    clockOffset = s.now - Date.now() / 1000;
+    runningTime = s.runningTime;
+    runningTimeAt = Date.now();
     tick();
 
     const state = s.asleep ? 'asleep' : s.paused ? 'paused' : 'playing';
@@ -236,6 +231,7 @@
     try {
       render(await call('/api/status'));
     } catch (e) {
+      runningTime = null;   // not running: stop the timer
       $('dot').className = 'dot offline';
       $('status').textContent = 'Not responding';
     }

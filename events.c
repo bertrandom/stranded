@@ -43,6 +43,7 @@ int evMaxSpeed = 0;
 
 static void eventsQuit()
 {
+    cfgSaveRunningTime(1);
     graphicsEnd();
     exit(255);
 }
@@ -104,6 +105,8 @@ static void eventsDoAction(int action)
 static void eventsProcessEvents()
 {
     SDL_Event event;
+
+    cfgSaveRunningTime(0);
 
     while (SDL_PollEvent(&event)) {
 

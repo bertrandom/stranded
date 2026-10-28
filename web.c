@@ -33,7 +33,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include <SDL2/SDL.h>
 #include "mytypes.h"
@@ -173,8 +172,7 @@ static void webRespondStatus(int fd)
         "  \"asleep\": %s,\n"
         "  \"nightScheduled\": %s,\n"
         "  \"nightOverride\": \"%s\",\n"
-        "  \"runningSince\": %lld,\n"
-        "  \"now\": %lld,\n"
+        "  \"runningTime\": %lld,\n"
         "  \"settings\": {\n"
         "    \"storyDay\": %d,\n"
         "    \"sound\": %s,\n"
@@ -193,8 +191,7 @@ static void webRespondStatus(int fd)
         JSON_BOOL(nightAsleep),
         JSON_BOOL(nightScheduled),
         override,
-        c.runningSince,
-        (long long) time(NULL),
+        cfgGetRunningTime(),
         c.currentDay,
         JSON_BOOL(c.sound),
         JSON_BOOL(c.hotkeys),
@@ -357,7 +354,7 @@ static void webHandleAction(int fd, char *name)
 {
     // Not an SDL action: nothing for the main thread to do
     if (!strcmp(name, "reset-timer")) {
-        cfgResetRunningSince();
+        cfgResetRunningTime();
         webRespondStatus(fd);
         return;
     }

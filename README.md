@@ -102,9 +102,9 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 | `POST /api/quit` | Terminate (hot key: Esc) |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
-| `POST /api/reset-timer` | Restart the "running for" timer from now |
+| `POST /api/reset-timer` | Reset the "running for" timer to zero |
 
-The status includes `runningSince`, the Unix time the page's "running for" timer counts from, and `now`, the current time on the server. The timer is saved with the settings, so it keeps counting across restarts (including any time the program wasn't running) until it's reset. It starts the first time jc_reborn runs.
+The status includes `runningTime`: how many seconds jc_reborn has been running in total, shown as a timer on the page. It's saved with the settings once a minute and when quitting, so it carries on across restarts but doesn't count the time the program isn't running. If the program is killed without quitting, up to a minute is lost.
 
 Every request except `quit` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
