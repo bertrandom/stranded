@@ -102,9 +102,9 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 | `POST /api/quit` | Terminate (hot key: Esc) |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
-| `POST /api/reset-timer` | Reset the "running for" timer to zero |
+| `POST /api/reset-timer` | Reset the "stranded for" timer to zero |
 
-The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown as a timer on the page. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
+The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown on the page as how long Johnny has been stranded. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
 
 Every request except `quit` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
