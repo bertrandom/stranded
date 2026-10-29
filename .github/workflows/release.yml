@@ -47,14 +47,14 @@ jobs:
           mkdir dist
           mv ../stranded_*.deb dist/
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: stranded-deb
           path: dist/*.deb
 
       - name: Publish the release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.deb
           generate_release_notes: true
