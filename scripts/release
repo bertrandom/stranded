@@ -1,0 +1,75 @@
+#!/bin/sh
+# Tags master's latest commit and publishes it as a GitHub release
+#
+#   scripts/release             the version is today's date, eg. v2026.10.29,
+#                               then v2026.10.29.1, .2 and so on
+#   scripts/release <version>   eg. v2026.11.01
+#
+# Creating the tag starts the "Debian package" workflow, which builds the .deb
+# and attaches it to the release. This waits for it, since until then the
+# latest release has no package for stranded-update to install
+set -eu
+
+REPO=bertrandom/stranded
+BRANCH=master
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
+    echo "Not on $BRANCH" >&2
+    exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+    echo "There are uncommitted changes" >&2
+    exit 1
+fi
+
+git fetch --quiet --tags origin "$BRANCH"
+sha=$(git rev-parse HEAD)
+if [ "$sha" != "$(git rev-parse "origin/$BRANCH")" ]; then
+    echo "$BRANCH isn't the same as origin/$BRANCH: push or pull first" >&2
+    exit 1
+fi
+
+existing=$(git tag --points-at "$sha" 'v*')
+if [ -n "$existing" ]; then
+    echo "$sha is already released as $existing" >&2
+    exit 1
+fi
+
+if [ $# -gt 0 ]; then
+    tag=v${1#v}
+else
+    tag=v$(date +%Y.%m.%d)
+    n=0
+    while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+        n=$((n + 1))
+        tag=v$(date +%Y.%m.%d).$n
+    done
+fi
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    echo "$tag already exists" >&2
+    exit 1
+fi
+
+echo "Releasing $(git log -1 --format='%h %s' "$sha") as $tag"
+gh release create "$tag" --repo "$REPO" --target "$sha" --title "$tag" --generate-notes
+git fetch --quiet --tags origin
+
+# The workflow run can take a few seconds to show up
+echo "Waiting for the package to build"
+run=
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    run=$(gh run list --repo "$REPO" --workflow release.yml --branch "$tag" \
+        --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+    [ -n "$run" ] && break
+    sleep 5
+done
+if [ -z "$run" ]; then
+    echo "Couldn't find the workflow run for $tag: check https://github.com/$REPO/actions" >&2
+    exit 1
+fi
+
+gh run watch "$run" --repo "$REPO" --exit-status
+gh release view "$tag" --repo "$REPO" --json url,assets \
+    --jq '.url, (.assets[].name | "  " + .)'
