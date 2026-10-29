@@ -21,7 +21,7 @@
  *
  */
 
-#define CFG_FILENAME ".jc_reborn"
+#define CFG_FILENAME ".stranded"
 
 struct TConfig {
     int currentDay;

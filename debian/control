@@ -1,0 +1,21 @@
+Source: stranded
+Section: misc
+Priority: optional
+Maintainer: Bertrand Fan <bert@bert.org>
+Build-Depends: debhelper-compat (= 13), dh-sequence-installsysusers, git, libdrm-dev, libsdl2-dev, pkgconf
+Standards-Version: 4.7.0
+Homepage: https://github.com/bertrandom/stranded
+Rules-Requires-Root: no
+
+Package: stranded
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: polkitd, v4l-utils
+Description: Johnny Castaway screensaver, as a full screen service
+ Stranded plays the 1992 Johnny Castaway screensaver full screen, straight
+ through KMS/DRM, as a systemd service. It has a web page and an API to
+ control it, a night mode that turns the display off, and widescreen
+ support.
+ .
+ The original game's data files aren't included: put RESOURCE.MAP,
+ RESOURCE.001 and, optionally, the sounds in /var/lib/stranded.

@@ -1,0 +1,25 @@
+[Unit]
+Description=Stranded (Johnny Castaway screensaver)
+# The game's data files aren't part of the package
+ConditionPathExists=/var/lib/stranded/RESOURCE.MAP
+
+[Service]
+User=stranded
+WorkingDirectory=/var/lib/stranded
+Environment=SDL_VIDEODRIVER=kmsdrm
+ExecStart=/usr/bin/stranded hotkeys web
+# Lets the web server listen on port 80 without running as root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty-force
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=5
+# stranded exits with 255 when it quits normally (Esc or SIGTERM)
+SuccessExitStatus=255
+
+[Install]
+WantedBy=multi-user.target

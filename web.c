@@ -81,6 +81,11 @@ void webInit()
 #define RESPONSE_LEN    4096
 #define PAGE_FILENAME   "webui.html"
 
+// Where the page is installed, if it isn't in the current directory
+#ifndef DATA_DIR
+#define DATA_DIR        "/usr/share/stranded"
+#endif
+
 #define JSON_BOOL(x)    ((x) ? "true" : "false")
 
 
@@ -99,8 +104,8 @@ static const struct {
     { "sleep",           EV_ACTION_SLEEP,           "Turn the display off now, until the next scheduled switch" },
     { "wake",            EV_ACTION_WAKE,            "Turn the display on now, until the next scheduled switch" },
     { "auto",            EV_ACTION_AUTO,            "Cancel a manual sleep or wake, and follow the night schedule" },
-    { "restart",         EV_ACTION_QUIT,            "Quit, so that the service manager starts jc_reborn again. Returns {\"ok\": true} rather than the status" },
-    { "quit",            EV_ACTION_QUIT,            "Terminate (hot key: Esc). Run as a service, jc_reborn is started again. Returns {\"ok\": true} rather than the status" },
+    { "restart",         EV_ACTION_QUIT,            "Quit, so that the service manager starts stranded again. Returns {\"ok\": true} rather than the status" },
+    { "quit",            EV_ACTION_QUIT,            "Terminate (hot key: Esc). Run as a service, stranded is started again. Returns {\"ok\": true} rather than the status" },
 };
 
 
@@ -112,7 +117,7 @@ static const struct {
 } webEndpoints[] = {
     { "GET",  "/",                "The settings page" },
     { "GET",  "/api",             "This list of endpoints and settings" },
-    { "GET",  "/api/status",      "Current state, what's playing (nowPlaying), the display's resolution (display), the git revision jc_reborn was built from (revision) and the settings" },
+    { "GET",  "/api/status",      "Current state, what's playing (nowPlaying), the display's resolution (display), the git revision stranded was built from (revision) and the settings" },
     { "GET",  "/api/settings",    "Same as GET /api/status" },
     { "POST", "/api/settings",    "Change one or more settings. Body: a JSON object, eg. {\"nightMode\": true, \"nightStart\": \"22:00\"}. Either all of them are applied or, on error, none" },
     { "GET",  "/api/screenshot",  "What's on screen, as a BMP image" },
@@ -373,6 +378,9 @@ static void webRespondScreenshot(int fd)
 static void webRespondPage(int fd)
 {
     FILE *f = fopen(PAGE_FILENAME, "rb");
+
+    if (f == NULL)
+        f = fopen(DATA_DIR "/" PAGE_FILENAME, "rb");
 
     if (f == NULL) {
         webRespondError(fd, 404, PAGE_FILENAME " not found");
@@ -696,7 +704,7 @@ static void webRespondApi(int fd)
 }
 
 
-// Reboot or power off the computer, through systemd. jc_reborn usually
+// Reboot or power off the computer, through systemd. stranded usually
 // runs as an unprivileged user: it needs to be allowed to, by a polkit rule
 static void webSystemctl(int fd, char *verb)
 {
@@ -712,7 +720,7 @@ static void webSystemctl(int fd, char *verb)
             || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         char message[128];
         snprintf(message, sizeof(message),
-                 "systemctl %s failed: is jc_reborn allowed to? See the README", verb);
+                 "systemctl %s failed: is stranded allowed to? See the README", verb);
         webRespondError(fd, 500, message);
         return;
     }

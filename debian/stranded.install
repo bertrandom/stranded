@@ -1,0 +1,4 @@
+stranded usr/bin/
+webui.html usr/share/stranded/
+debian/extra/50-stranded.rules usr/share/polkit-1/rules.d/
+debian/extra/stranded.conf usr/lib/systemd/system/getty@tty1.service.d/

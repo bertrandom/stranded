@@ -1,0 +1,56 @@
+name: Debian package
+
+# Builds the Debian package on every push. Pushing a tag like v2026.10.29
+# also publishes it as a GitHub release, with that version
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04-arm
+    # The same release as Raspberry Pi OS, for the same libraries
+    container: debian:trixie
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates debhelper git libdrm-dev libsdl2-dev pkgconf
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # for git describe
+
+      - name: Set the version
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          else
+            version=0.0.0+git$(git rev-parse --short HEAD)
+          fi
+          echo "GIT_REVISION=$(git describe --always --dirty)" >> "$GITHUB_ENV"
+          sed -i "1s/(.*)/($version)/" debian/changelog
+          echo "Version $version"
+
+      - name: Build
+        run: |
+          dpkg-buildpackage -b -us -uc
+          mkdir dist
+          mv ../stranded_*.deb dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stranded-deb
+          path: dist/*.deb
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          generate_release_notes: true

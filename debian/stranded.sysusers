@@ -1,0 +1,5 @@
+u stranded - "Stranded screensaver" /var/lib/stranded /usr/sbin/nologin
+m stranded video
+m stranded render
+m stranded input
+m stranded audio

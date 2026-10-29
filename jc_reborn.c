@@ -54,13 +54,13 @@ static void usage()
 {
         printf("\n");
         printf(" Usage :\n");
-        printf("         jc_reborn\n");
-        printf("         jc_reborn help\n");
-        printf("         jc_reborn version\n");
-        printf("         jc_reborn dump\n");
-        printf("         jc_reborn [<options>] bench\n");
-        printf("         jc_reborn [<options>] ttm <TTM name>\n");
-        printf("         jc_reborn [<options>] ads <ADS name> <ADS tag no>\n");
+        printf("         stranded\n");
+        printf("         stranded help\n");
+        printf("         stranded version\n");
+        printf("         stranded dump\n");
+        printf("         stranded [<options>] bench\n");
+        printf("         stranded [<options>] ttm <TTM name>\n");
+        printf("         stranded [<options>] ads <ADS name> <ADS tag no>\n");
         printf("\n");
         printf(" Available options are:\n");
         printf("         window     - play in windowed mode\n");
@@ -91,9 +91,9 @@ static void usage()
 static void version()
 {
         printf("\n");
-        printf("    Johnny Reborn, an open-source engine for\n");
+        printf("    Stranded, based on Johnny Reborn: an open-source engine for\n");
         printf("    the classic Johnny Castaway screensaver by Sierra.\n");
-        printf("    Development version Copyright (C) 2019 Jeremie GUILLAUME\n");
+        printf("    Johnny Reborn: Copyright (C) 2019 Jeremie GUILLAUME\n");
         printf("\n");
         exit(1);
 }

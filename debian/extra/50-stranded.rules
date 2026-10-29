@@ -1,0 +1,10 @@
+// Lets stranded's web page reboot or shut down the computer
+polkit.addRule(function(action, subject) {
+    if (subject.user == "stranded" &&
+        (action.id == "org.freedesktop.login1.reboot" ||
+         action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions")) {
+        return polkit.Result.YES;
+    }
+});

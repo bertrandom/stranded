@@ -182,7 +182,7 @@ void graphicsInit()
     // Full screen at the display's own resolution, rather than switching to
     // a 640x480 mode: the picture is scaled up by the renderer instead
     sdl_window = SDL_CreateWindow(
-        "Johnny Reborn ...?",
+        "Stranded",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
         grWidth,

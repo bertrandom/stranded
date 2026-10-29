@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/pkg-info.mk
+
+# Shown on the web page: the git revision, or the package's version when
+# not built from a git checkout. The release workflow sets it, as it changes
+# debian/changelog (which would make it "-dirty")
+GIT_REVISION ?= $(shell git describe --always --dirty 2>/dev/null || echo $(DEB_VERSION))
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) -f Makefile.linux GIT_REVISION=$(GIT_REVISION)
+
+override_dh_auto_clean:
+	$(MAKE) -f Makefile.linux clean
+
+# The Makefile doesn't build with debug info: no point in a dbgsym package
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

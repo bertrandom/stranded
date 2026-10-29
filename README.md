@@ -1,11 +1,41 @@
-# Johnny Reborn
+# Stranded
 
-Johnny Reborn is an open source engine for the classic Johnny Castaway screen saver, developed by Dynamix for Windows 3.x and published by Sierra, back in 1992.
+Stranded plays the classic Johnny Castaway screen saver, developed by Dynamix for Windows 3.x and published by Sierra back in 1992, full screen on Linux, for example on a Raspberry Pi. It adds a web page and an API to control it, a night mode that turns the display off, and widescreen support.
 
-It is written in C using the SDL2 library, and was successfully compiled and tested on Linux as well as Windows (MinGW), both 32 and 64 bits.
+It's a fork of [Johnny Reborn](https://github.com/jno6809/jc_reborn), Jeremie Guillaume's open source engine for the screen saver, written in C using the SDL2 library. For a ready-made Raspberry Pi SD card image, see [stranded-pi](https://github.com/bertrandom/stranded-pi).
 
 
 ## How to install
+
+### Debian package
+
+Each [release](https://github.com/bertrandom/stranded/releases) has a Debian package for 64-bit ARM (Raspberry Pi OS and Debian 13 "trixie"):
+
+    sudo apt install ./stranded_<version>_arm64.deb
+
+It installs:
+
+| What | Where |
+| --- | --- |
+| The program | `/usr/bin/stranded` |
+| The web page | `/usr/share/stranded/webui.html` |
+| A `stranded` system user, whose home holds the data files and the settings | `/var/lib/stranded` |
+| A service that runs `stranded hotkeys web` as that user on `/dev/tty1`, drawing straight to the screen with KMS/DRM | `stranded.service`, enabled |
+| An override that disables the login prompt on tty1 while the service is enabled | `/usr/lib/systemd/system/getty@tty1.service.d/stranded.conf` |
+| A polkit rule letting the `stranded` user reboot and shut down the computer, for the web page | `/usr/share/polkit-1/rules.d/50-stranded.rules` |
+
+The data files aren't included (see below): copy them to `/var/lib/stranded`, then start the service. It doesn't start until `RESOURCE.MAP` is there.
+
+    sudo systemctl start stranded
+    journalctl -u stranded
+
+### Building from source
+
+    make -f Makefile.linux
+
+This needs a C compiler, `pkg-config` and SDL2's development files, plus `libdrm`'s to turn the monitor off in night mode (eg. `sudo apt install build-essential pkgconf libsdl2-dev libdrm-dev`). To build the Debian package instead: `dpkg-buildpackage -b -us -uc`, which needs `debhelper` too.
+
+### Data files
 
 For the screen saver to work, you'll need the two data files from the original
 software: `RESOURCE.MAP` and `RESOURCE.001`.
@@ -42,7 +72,7 @@ As a result, here is what your directory should look like:
  | sound23.wav  |         2048 | 52fc04e523af3b28c4c6758cdbcafb84 |
  | sound24.wav  |         9728 | 5a6696cda2a07969522ac62db3e66757 |
 
-All files must be copied in the same directory as the `jc_reborn` executable.
+All files must be in the directory stranded is run from: `/var/lib/stranded` for the Debian package's service.
 
 
 ## How to run
@@ -57,18 +87,18 @@ The original scenes are 640x480 (4:3). On a wider display, such as 16:9, the pic
 
 The display's shape is detected automatically. To override it, use the `aspect` option, eg. `aspect 16:10`, or `aspect 4:3` to never widen the picture.
 
-But, if you're curious about how the engine works, you may type `jc_reborn help` and see the different options available. Feel free to try them and explore the inner workings of Screen Antics !
+But, if you're curious about how the engine works, you may type `stranded help` and see the different options available. Feel free to try them and explore the inner workings of Screen Antics !
 
 
 ## Web control and night mode
 
 Run with the `web` option to start a small web server on port 80 (or `port <n>` to pick another port):
 
-    jc_reborn hotkeys web
+    stranded hotkeys web
 
-Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. It serves `webui.html` from the current directory, so keep that file next to the `jc_reborn` executable. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
+Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. It serves `webui.html` from the current directory or, if it isn't there, from `/usr/share/stranded`. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
 
-There is no authentication: anyone who can reach the port can change the settings, quit, or reboot and shut down the computer if jc_reborn is allowed to (see below). Only use it on a network you trust.
+There is no authentication: anyone who can reach the port can change the settings, quit, or reboot and shut down the computer if stranded is allowed to (see below). Only use it on a network you trust.
 
 ### Night mode
 
@@ -82,7 +112,7 @@ In the morning, the display comes back on and Johnny picks up where he left off.
 
 ### Settings
 
-Settings changed from the web page are saved in `~/.jc_reborn`, next to the story progress, and take precedence over the command line options at the next start.
+Settings changed from the web page are saved in `~/.stranded`, next to the story progress, and take precedence over the command line options at the next start.
 
 | Setting      | Values           | Meaning |
 | -------------|------------------|---------|
@@ -100,7 +130,7 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 | Request | Effect |
 | --------|--------|
 | `GET /api` | Every endpoint and setting, with a description, as JSON |
-| `GET /api/status` | Current state and settings, as JSON: what's playing (`nowPlaying`), the display's resolution (`display`), the git revision jc_reborn was built from (`revision`, from `git describe --always --dirty`), etc. |
+| `GET /api/status` | Current state and settings, as JSON: what's playing (`nowPlaying`), the display's resolution (`display`), the git revision stranded was built from (`revision`, from `git describe --always --dirty`), etc. |
 | `GET /api/screenshot` | What's on screen, as a BMP image |
 | `POST /api/settings` | Change one or more settings. Body: a JSON object, eg. `{"nightMode": true, "nightStart": "22:00"}`. Either all of them are applied or, on error, none |
 | `POST /api/pause`, `POST /api/resume`, `POST /api/toggle-pause` | Pause or resume (hot key: Space) |
@@ -108,16 +138,16 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 | `POST /api/toggle-maxspeed` | Toggle max / normal speed (hot key: M) |
 | `POST /api/next-scene` | End the current scene and play the next one (hot key: N) |
 | `POST /api/quit` | Terminate (hot key: Esc) |
-| `POST /api/restart` | Same as `quit`: run as a service with `Restart=always`, jc_reborn is started again |
+| `POST /api/restart` | Same as `quit`: run as a service with `Restart=always`, stranded is started again |
 | `POST /api/reboot`, `POST /api/shutdown` | Reboot or shut down the computer, with `systemctl reboot` or `systemctl poweroff` |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
 | `POST /api/reset-timer` | Reset the "stranded for" timer to zero |
 
-Rebooting and shutting down go through systemd, so jc_reborn needs to be allowed to. Run by an unprivileged user (here, `johnny`), that takes a polkit rule such as `/etc/polkit-1/rules.d/50-jc_reborn.rules`:
+Rebooting and shutting down go through systemd, so stranded needs to be allowed to. Run by an unprivileged user, that takes a polkit rule. The Debian package installs one for its `stranded` user, `/usr/share/polkit-1/rules.d/50-stranded.rules`:
 
     polkit.addRule(function(action, subject) {
-        if (subject.user == "johnny" &&
+        if (subject.user == "stranded" &&
             (action.id == "org.freedesktop.login1.reboot" ||
              action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
              action.id == "org.freedesktop.login1.power-off" ||
@@ -130,12 +160,12 @@ Otherwise, these requests fail with a 500 error.
 
 The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown on the page as how long Johnny has been stranded. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
 
-Every request except `quit` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
+Every request except `quit`, `restart`, `reboot` and `shutdown` (which return `{"ok": true}`) returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
-    curl http://pijohnny/api/status
-    curl http://pijohnny/api
-    curl -H 'Content-Type: application/json' -d '{"nightMode": true, "nightStart": "22:00", "nightEnd": "08:00"}' http://pijohnny/api/settings
-    curl -X POST http://pijohnny/api/toggle-pause
+    curl http://raspberrypi.local/api/status
+    curl http://raspberrypi.local/api
+    curl -H 'Content-Type: application/json' -d '{"nightMode": true, "nightStart": "22:00", "nightEnd": "08:00"}' http://raspberrypi.local/api/settings
+    curl -X POST http://raspberrypi.local/api/toggle-pause
 
 
 ## Current status

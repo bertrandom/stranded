@@ -14,7 +14,7 @@ endif
 GIT_REVISION := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 $(shell echo $(GIT_REVISION) | cmp -s - revision.txt || echo $(GIT_REVISION) > revision.txt)
 
-EXE =   jc_reborn
+EXE =   stranded
 
 OBJ =   jc_reborn.o \
         utils.o \
@@ -39,6 +39,7 @@ OBJ =   jc_reborn.o \
 all: $(EXE)
 
 $(EXE): $(OBJ)
+	$(CC) $(LDFLAGS) $(OBJ) $(LDLIBS) -o $@
 
 web.o: CFLAGS += -DGIT_REVISION='"$(GIT_REVISION)"'
 web.o: revision.txt
