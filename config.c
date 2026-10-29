@@ -143,7 +143,7 @@ void cfgInit()
     cfgMutex = SDL_CreateMutex();
 
     cfg.currentDay = 0;
-    cfg.date       = 0;
+    cfg.date       = -1;    // not known yet
     cfg.sound      = 1;
     cfg.hotkeys    = evHotKeysEnabled;
     cfg.debug      = debugMode;

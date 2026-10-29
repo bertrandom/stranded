@@ -24,6 +24,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __linux__
+#include <sys/timex.h>
+#endif
+
 #include "mytypes.h"
 #include "utils.h"
 #include "graphics.h"
@@ -62,6 +66,20 @@ static struct TStoryScene *storyPickScene(
 }
 
 
+// Whether the system clock has been set from a time server. A computer
+// without a battery-backed clock, like a Raspberry Pi, starts with the
+// last time it saved (or the date its OS image was made) until then
+static int storyClockIsSynchronized()
+{
+#ifdef __linux__
+    struct timex tx = { 0 };    // modes = 0: only read the clock's state
+    return ntp_adjtime(&tx) != TIME_ERROR;
+#else
+    return 1;
+#endif
+}
+
+
 static void storyUpdateCurrentDay()
 {
     int today;
@@ -70,11 +88,21 @@ static void storyUpdateCurrentDay()
     cfgLock();
     today = getDayOfYear();
 
-    if (today != cfg.date) {
-        debugMsg("System date has changed since last sequence -> next day of the story");
-        cfg.date = today;
-        cfg.currentDay += 1;
-        hasChanged = 1;
+    // Only trust the date once the clock is synchronized: otherwise, the
+    // clock being corrected would count as a day passing
+    if (storyClockIsSynchronized()) {
+
+        if (cfg.date == -1) {
+            debugMsg("First known date of the story");
+            cfg.date = today;
+            hasChanged = 1;
+        }
+        else if (today != cfg.date) {
+            debugMsg("System date has changed since last sequence -> next day of the story");
+            cfg.date = today;
+            cfg.currentDay += 1;
+            hasChanged = 1;
+        }
     }
 
     if (cfg.currentDay < 1 || cfg.currentDay > 11) {
