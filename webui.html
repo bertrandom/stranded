@@ -47,6 +47,7 @@
   .dot.paused { background: #d39b2a; }
   .dot.asleep { background: var(--night); }
   .dot.offline { background: var(--danger); }
+  .preview.offline { opacity: .35; }
   section { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
   button {
@@ -119,7 +120,6 @@
       <button id="step" data-action="step" title="Advance one frame while paused">Step</button>
       <button id="maxspeed" data-action="toggle-maxspeed">Max speed</button>
       <button id="next" data-action="next-scene" title="End the current scene and play the next one">Next scene</button>
-      <button class="danger" data-action="quit" data-confirm="Quit jc_reborn? If it runs as a service it will restart.">Quit</button>
     </div>
   </section>
 
@@ -170,6 +170,19 @@
     <div class="row">
       <label>Resolution<span class="hint">The picture is scaled up to fill the display</span></label>
       <span class="value" id="resolution">–</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>System</h2>
+    <div class="buttons">
+      <button data-action="restart" data-confirm="Restart Johnny? The screen goes black for a few seconds." data-done="Restarting…">Restart Johnny</button>
+      <button data-action="reboot" data-confirm="Reboot the Raspberry Pi? This page stops responding for a minute or so." data-done="Rebooting…">Reboot</button>
+      <button class="danger" data-action="shutdown" data-confirm="Shut down the Raspberry Pi? It stays off until it's unplugged and plugged back in." data-done="Shutting down…">Shut down</button>
+    </div>
+    <div class="row" style="margin-top: 12px">
+      <label>Version<span class="hint">Git revision jc_reborn was built from</span></label>
+      <span class="value" id="revision">–</span>
     </div>
   </section>
 </main>
@@ -254,6 +267,7 @@
   }
 
   function render(s) {
+    $('preview').classList.remove('offline');
     runningTime = s.runningTime;
     runningTimeAt = Date.now();
     runningCounted = !s.asleep;
@@ -280,6 +294,7 @@
     $('sound').disabled = !s.soundAvailable;
 
     renderNowPlaying(s);
+    $('revision').textContent = s.revision;
 
     const d = s.display;
     $('resolution').textContent =
@@ -298,8 +313,9 @@
     $('nightState').textContent = night;
   }
 
+  // A request that hangs (eg. while the Pi shuts down) counts as failed
   async function call(path, options) {
-    const response = await fetch(path, options);
+    const response = await fetch(path, { signal: AbortSignal.timeout(4000), ...options });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
     return data;
@@ -312,6 +328,11 @@
       runningTime = null;   // not running: stop the timer
       $('dot').className = 'dot offline';
       $('status').textContent = 'Not responding';
+      $('elapsed').textContent = 'Unavailable';
+      $('nowTitle').textContent = 'Unavailable';
+      $('nowDetail').textContent = '';
+      $('nowBadge').hidden = true;
+      $('preview').classList.add('offline');
     }
   }
 
@@ -321,7 +342,7 @@
       try {
         const result = await call('/api/' + button.dataset.action, { method: 'POST' });
         if (result.settings) render(result);
-        else toast('Done');
+        else toast(button.dataset.done || 'Done');
       } catch (e) {
         toast(e.message, true);
       }
@@ -330,12 +351,15 @@
 
   for (const el of document.querySelectorAll('[data-setting]')) {
     el.addEventListener('change', async () => {
-      const value = el.type === 'checkbox' ? el.checked : el.value;
-      if (value === '') return;
+      if (el.value === '') return;
+      const value = el.type === 'checkbox' ? el.checked
+                  : el.dataset.setting === 'storyDay' ? Number(el.value)
+                  : el.value;
       try {
         render(await call('/api/settings', {
           method: 'POST',
-          body: new URLSearchParams({ [el.dataset.setting]: value }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [el.dataset.setting]: value }),
         }));
         el.blur();
         toast('Saved');

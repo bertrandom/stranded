@@ -22,4 +22,5 @@
  */
 
 void storyPlay();
+int storyClockIsSynchronized();
 

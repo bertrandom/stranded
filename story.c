@@ -69,7 +69,7 @@ static struct TStoryScene *storyPickScene(
 // Whether the system clock has been set from a time server. A computer
 // without a battery-backed clock, like a Raspberry Pi, starts with the
 // last time it saved (or the date its OS image was made) until then
-static int storyClockIsSynchronized()
+int storyClockIsSynchronized()
 {
 #ifdef __linux__
     struct timex tx = { 0 };    // modes = 0: only read the clock's state

@@ -9,6 +9,11 @@ CFLAGS += -DHAVE_LIBDRM $(shell pkg-config --cflags libdrm)
 LDLIBS += $(shell pkg-config --libs libdrm)
 endif
 
+# The git revision, shown on the web page. revision.txt is only rewritten
+# when it changes, so that web.o is rebuilt then and only then
+GIT_REVISION := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
+$(shell echo $(GIT_REVISION) | cmp -s - revision.txt || echo $(GIT_REVISION) > revision.txt)
+
 EXE =   jc_reborn
 
 OBJ =   jc_reborn.o \
@@ -35,6 +40,9 @@ all: $(EXE)
 
 $(EXE): $(OBJ)
 
+web.o: CFLAGS += -DGIT_REVISION='"$(GIT_REVISION)"'
+web.o: revision.txt
+
 clean:
-	rm -v $(OBJ) $(EXE) 2> /dev/null ; true
+	rm -v $(OBJ) $(EXE) revision.txt 2> /dev/null ; true
 

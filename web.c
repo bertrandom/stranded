@@ -32,6 +32,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <SDL2/SDL.h>
@@ -43,10 +44,16 @@
 #include "config.h"
 #include "night.h"
 #include "ads.h"
+#include "story.h"
 #include "web.h"
 
 
 int webPort = 0;    // 0: web server disabled
+
+// Set by Makefile.linux, from git
+#ifndef GIT_REVISION
+#define GIT_REVISION "unknown"
+#endif
 
 
 #ifdef _WIN32
@@ -67,6 +74,7 @@ void webInit()
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 
 #define REQUEST_LEN     8192
@@ -76,20 +84,41 @@ void webInit()
 #define JSON_BOOL(x)    ((x) ? "true" : "false")
 
 
+// Actions, as POST /api/<name>
 static const struct {
     char *name;
     int  action;
+    char *description;
 } webActions[] = {
-    { "pause",             EV_ACTION_PAUSE             },
-    { "resume",            EV_ACTION_RESUME            },
-    { "toggle-pause",      EV_ACTION_TOGGLE_PAUSE      },
-    { "step",              EV_ACTION_STEP              },
-    { "toggle-maxspeed",   EV_ACTION_TOGGLE_MAXSPEED   },
-    { "quit",              EV_ACTION_QUIT              },
-    { "sleep",             EV_ACTION_SLEEP             },
-    { "wake",              EV_ACTION_WAKE              },
-    { "auto",              EV_ACTION_AUTO              },
-    { "next-scene",        EV_ACTION_NEXT_SCENE        },
+    { "pause",           EV_ACTION_PAUSE,           "Pause (hot key: Space)" },
+    { "resume",          EV_ACTION_RESUME,          "Resume (hot key: Space)" },
+    { "toggle-pause",    EV_ACTION_TOGGLE_PAUSE,    "Pause or resume (hot key: Space)" },
+    { "step",            EV_ACTION_STEP,            "When paused, advance one frame (hot key: Return)" },
+    { "next-scene",      EV_ACTION_NEXT_SCENE,      "End the current scene and play the next one (hot key: N)" },
+    { "toggle-maxspeed", EV_ACTION_TOGGLE_MAXSPEED, "Toggle max / normal speed (hot key: M)" },
+    { "sleep",           EV_ACTION_SLEEP,           "Turn the display off now, until the next scheduled switch" },
+    { "wake",            EV_ACTION_WAKE,            "Turn the display on now, until the next scheduled switch" },
+    { "auto",            EV_ACTION_AUTO,            "Cancel a manual sleep or wake, and follow the night schedule" },
+    { "restart",         EV_ACTION_QUIT,            "Quit, so that the service manager starts jc_reborn again. Returns {\"ok\": true} rather than the status" },
+    { "quit",            EV_ACTION_QUIT,            "Terminate (hot key: Esc). Run as a service, jc_reborn is started again. Returns {\"ok\": true} rather than the status" },
+};
+
+
+// The other endpoints, as listed by GET /api
+static const struct {
+    char *method;
+    char *path;
+    char *description;
+} webEndpoints[] = {
+    { "GET",  "/",                "The settings page" },
+    { "GET",  "/api",             "This list of endpoints and settings" },
+    { "GET",  "/api/status",      "Current state, what's playing (nowPlaying), the display's resolution (display), the git revision jc_reborn was built from (revision) and the settings" },
+    { "GET",  "/api/settings",    "Same as GET /api/status" },
+    { "POST", "/api/settings",    "Change one or more settings. Body: a JSON object, eg. {\"nightMode\": true, \"nightStart\": \"22:00\"}. Either all of them are applied or, on error, none" },
+    { "GET",  "/api/screenshot",  "What's on screen, as a BMP image" },
+    { "POST", "/api/reset-timer", "Reset the \"stranded for\" timer to zero" },
+    { "POST", "/api/reboot",      "Reboot the computer, with systemctl reboot. Needs the permission to (see the README). Returns {\"ok\": true}" },
+    { "POST", "/api/shutdown",    "Shut the computer down, with systemctl poweroff. Needs the permission to (see the README). Returns {\"ok\": true}" },
 };
 
 
@@ -199,6 +228,7 @@ static void webRespondStatus(int fd)
         "  \"asleep\": %s,\n"
         "  \"nightScheduled\": %s,\n"
         "  \"nightOverride\": \"%s\",\n"
+        "  \"revision\": \"%s\",\n"
         "  \"runningTime\": %lld,\n"
         "  \"nowPlaying\": {\n"
         "    \"activity\": \"%s\",\n"
@@ -230,6 +260,7 @@ static void webRespondStatus(int fd)
         JSON_BOOL(nightAsleep),
         JSON_BOOL(nightScheduled),
         override,
+        GIT_REVISION,
         cfgGetRunningTime(),
         nowPlaying.activity,
         nowPlaying.adsName,
@@ -361,61 +392,128 @@ static void webRespondPage(int fd)
 }
 
 
-// Decode a x-www-form-urlencoded value, in place
-static void webUrlDecode(char *str)
+// The settings which POST /api/settings accepts, as listed by GET /api
+static const struct {
+    char *name;
+    char *type;
+    char *constraints;  // more JSON properties for GET /api, or NULL
+    char *description;
+} webSettings[] = {
+    { "storyDay",   "integer", "\"minimum\": 1, \"maximum\": 11",
+      "Day of the story. It normally advances by one each day; a new value takes effect at the next scene" },
+    { "sound",      "boolean", NULL, "Play sounds. Without effect if started with nosound" },
+    { "hotkeys",    "boolean", NULL, "Enable hot keys. When off, any key press quits" },
+    { "debug",      "boolean", NULL, "Print debug info. Not saved" },
+    { "nightMode",  "boolean", NULL, "Turn the display off during night hours" },
+    { "nightStart", "string",  "\"format\": \"HH:MM\"", "Start of the night, local time" },
+    { "nightEnd",   "string",  "\"format\": \"HH:MM\"", "End of the night, local time" },
+    { "cec",        "boolean", NULL, "Also put the TV in standby with HDMI-CEC" },
+};
+
+
+// A value of a JSON object, as found in a settings request
+enum { JSON_STRING, JSON_INTEGER, JSON_BOOLEAN };
+
+struct TJsonValue {
+    int  type;
+    char string[64];
+    long integer;
+    int  boolean;
+};
+
+
+static void webSkipJsonSpaces(char **p)
 {
-    char *out = str;
-
-    for (; *str; str++) {
-        if (*str == '+') {
-            *out++ = ' ';
-        }
-        else if (*str == '%' && str[1] && str[2]) {
-            char hex[3] = { str[1], str[2], 0 };
-            *out++ = (char) strtol(hex, NULL, 16);
-            str += 2;
-        }
-        else {
-            *out++ = *str;
-        }
-    }
-
-    *out = 0;
+    while (**p == ' ' || **p == '\t' || **p == '\n' || **p == '\r')
+        (*p)++;
 }
 
 
-static int webParseBool(const char *value, int *result)
+// Parse the JSON string at *p, and move past it. Returns 0 if malformed
+static int webParseJsonString(char **p, char *out, size_t outLen)
 {
-    if (!strcmp(value, "1") || !strcmp(value, "true") || !strcmp(value, "on"))
-        *result = 1;
-    else if (!strcmp(value, "0") || !strcmp(value, "false") || !strcmp(value, "off"))
-        *result = 0;
-    else
+    size_t n = 0;
+
+    if (**p != '"')
         return 0;
+
+    for ((*p)++; **p != '"'; (*p)++) {
+
+        char ch = **p;
+
+        if (ch == 0)
+            return 0;
+
+        if (ch == '\\') {
+            switch (*++(*p)) {
+                case '"': case '\\': case '/': ch = **p; break;
+                case 'n': ch = '\n'; break;
+                case 't': ch = '\t'; break;
+                default: return 0;      // \uXXXX isn't needed for any setting
+            }
+        }
+
+        if (n + 1 >= outLen)
+            return 0;
+
+        out[n++] = ch;
+    }
+
+    (*p)++;
+    out[n] = 0;
 
     return 1;
 }
 
 
+// Parse the JSON value at *p, and move past it. Only strings, integers and
+// booleans are accepted: no setting needs anything else
+static int webParseJsonValue(char **p, struct TJsonValue *value)
+{
+    if (**p == '"') {
+        value->type = JSON_STRING;
+        return webParseJsonString(p, value->string, sizeof(value->string));
+    }
+
+    if (!strncmp(*p, "true", 4) || !strncmp(*p, "false", 5)) {
+        value->type = JSON_BOOLEAN;
+        value->boolean = (**p == 't');
+        *p += value->boolean ? 4 : 5;
+        return 1;
+    }
+
+    if (**p == '-' || (**p >= '0' && **p <= '9')) {
+        char *end;
+        value->type = JSON_INTEGER;
+        value->integer = strtol(*p, &end, 10);
+        if (end == *p || *end == '.' || *end == 'e' || *end == 'E')
+            return 0;
+        *p = end;
+        return 1;
+    }
+
+    return 0;
+}
+
+
 // Returns an error message, or NULL if the setting is valid
-static char *webApplySetting(struct TConfig *c, char *key, char *value)
+static char *webApplySetting(struct TConfig *c, char *key, struct TJsonValue *value)
 {
     int *boolSetting = NULL;
     int time;
 
     if (!strcmp(key, "storyDay")) {
-        char *end;
-        long day = strtol(value, &end, 10);
-        if (*value == 0 || *end != 0 || day < 1 || day > 11)
-            return "storyDay must be between 1 and 11";
-        c->currentDay = day;
-        c->date = getDayOfYear();   // so that it isn't incremented right away
+        if (value->type != JSON_INTEGER || value->integer < 1 || value->integer > 11)
+            return "storyDay must be a number from 1 to 11";
+        c->currentDay = value->integer;
+        // So that it isn't incremented right away
+        c->date = storyClockIsSynchronized() ? getDayOfYear() : -1;
         return NULL;
     }
 
     if (!strcmp(key, "nightStart") || !strcmp(key, "nightEnd")) {
-        if ((time = cfgParseTime(value)) == -1)
-            return "nightStart and nightEnd must be HH:MM";
+        if (value->type != JSON_STRING || (time = cfgParseTime(value->string)) == -1)
+            return "nightStart and nightEnd must be strings, as HH:MM";
         if (!strcmp(key, "nightStart"))
             c->nightStart = time;
         else
@@ -429,42 +527,84 @@ static char *webApplySetting(struct TConfig *c, char *key, char *value)
     else if (!strcmp(key, "nightMode")) boolSetting = &c->nightMode;
     else if (!strcmp(key, "cec"))       boolSetting = &c->cec;
     else
-        return "unknown setting";
+        return "unknown setting, see GET /api";
 
-    if (!webParseBool(value, boolSetting))
+    if (value->type != JSON_BOOLEAN)
         return "boolean settings must be true or false";
+
+    *boolSetting = value->boolean;
 
     return NULL;
 }
 
 
-// Body: x-www-form-urlencoded, eg. sound=false&nightStart=22:00
+// Body: a JSON object, eg. {"sound": false, "nightStart": "22:00"}
 // Either every setting is applied, or none of them
 static void webHandleSettings(int fd, char *body)
 {
     struct TConfig c;
     char *error = NULL;
-    char *pair, *savePtr;
+    char *p = body;
 
     cfgLock();
     c = cfg;
 
-    for (pair = strtok_r(body, "&", &savePtr);
-         pair != NULL && error == NULL;
-         pair = strtok_r(NULL, "&", &savePtr)) {
+    webSkipJsonSpaces(&p);
 
-        char *value = strchr(pair, '=');
+    if (*p++ != '{')
+        error = "expected a JSON object";
 
-        if (value == NULL) {
-            error = "expected key=value pairs";
+    webSkipJsonSpaces(&p);
+
+    if (error == NULL && *p == '}')
+        p++;
+
+    else while (error == NULL) {
+
+        char key[32];
+        struct TJsonValue value;
+
+        if (!webParseJsonString(&p, key, sizeof(key))) {
+            error = "malformed JSON: expected a setting name";
             break;
         }
 
-        *value++ = 0;
-        webUrlDecode(pair);
-        webUrlDecode(value);
-        error = webApplySetting(&c, pair, value);
+        webSkipJsonSpaces(&p);
+
+        if (*p++ != ':') {
+            error = "malformed JSON: expected a colon";
+            break;
+        }
+
+        webSkipJsonSpaces(&p);
+
+        if (!webParseJsonValue(&p, &value)) {
+            error = "malformed JSON: values must be strings, integers or booleans";
+            break;
+        }
+
+        if ((error = webApplySetting(&c, key, &value)) != NULL)
+            break;
+
+        webSkipJsonSpaces(&p);
+
+        if (*p == ',') {
+            p++;
+            webSkipJsonSpaces(&p);
+        }
+        else if (*p == '}') {
+            p++;
+            break;
+        }
+        else {
+            error = "malformed JSON: expected a comma or a closing brace";
+        }
     }
+
+    webSkipJsonSpaces(&p);
+
+    if (error == NULL && *p != 0)
+        error = "malformed JSON: unexpected data after the object";
 
     if (error == NULL) {
         cfg = c;
@@ -484,8 +624,115 @@ static void webHandleSettings(int fd, char *body)
 }
 
 
+// Append to a response being built. Returns the new length
+static size_t webAppend(char *buf, size_t len, size_t bufLen, const char *fmt, ...)
+{
+    va_list ap;
+
+    if (len >= bufLen)
+        return len;
+
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + len, bufLen - len, fmt, ap);
+    va_end(ap);
+
+    return n < 0 ? len : len + n;
+}
+
+
+static void webRespondApi(int fd)
+{
+    char body[8192];
+    char escaped[512];
+    size_t len = 0, max = sizeof(body);
+    int numEndpoints = sizeof(webEndpoints) / sizeof(webEndpoints[0]);
+    int numActions   = sizeof(webActions) / sizeof(webActions[0]);
+    int numSettings  = sizeof(webSettings) / sizeof(webSettings[0]);
+
+    len = webAppend(body, len, max, "{\n  \"endpoints\": [\n");
+
+    for (int i=0; i < numEndpoints + numActions; i++) {
+
+        char path[64];
+        const char *method, *description;
+
+        if (i < numEndpoints) {
+            method = webEndpoints[i].method;
+            snprintf(path, sizeof(path), "%s", webEndpoints[i].path);
+            description = webEndpoints[i].description;
+        }
+        else {
+            method = "POST";
+            snprintf(path, sizeof(path), "/api/%s", webActions[i - numEndpoints].name);
+            description = webActions[i - numEndpoints].description;
+        }
+
+        webJsonEscape(escaped, sizeof(escaped), description);
+        len = webAppend(body, len, max,
+            "    { \"method\": \"%s\", \"path\": \"%s\", \"description\": \"%s\" }%s\n",
+            method, path, escaped, i < numEndpoints + numActions - 1 ? "," : "");
+    }
+
+    len = webAppend(body, len, max, "  ],\n  \"settings\": [\n");
+
+    for (int i=0; i < numSettings; i++) {
+        webJsonEscape(escaped, sizeof(escaped), webSettings[i].description);
+        len = webAppend(body, len, max,
+            "    { \"name\": \"%s\", \"type\": \"%s\", %s%s\"description\": \"%s\" }%s\n",
+            webSettings[i].name, webSettings[i].type,
+            webSettings[i].constraints ? webSettings[i].constraints : "",
+            webSettings[i].constraints ? ", " : "",
+            escaped, i < numSettings - 1 ? "," : "");
+    }
+
+    len = webAppend(body, len, max, "  ]\n}\n");
+
+    if (len >= max) {
+        webRespondError(fd, 500, "response too large");
+        return;
+    }
+
+    webRespondJson(fd, 200, body);
+}
+
+
+// Reboot or power off the computer, through systemd. jc_reborn usually
+// runs as an unprivileged user: it needs to be allowed to, by a polkit rule
+static void webSystemctl(int fd, char *verb)
+{
+    int status;
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        execlp("systemctl", "systemctl", "--no-ask-password", verb, (char *) NULL);
+        _exit(127);
+    }
+
+    if (pid < 0 || waitpid(pid, &status, 0) < 0
+            || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        char message[128];
+        snprintf(message, sizeof(message),
+                 "systemctl %s failed: is jc_reborn allowed to? See the README", verb);
+        webRespondError(fd, 500, message);
+        return;
+    }
+
+    webRespondJson(fd, 200, "{\"ok\": true}\n");
+}
+
+
 static void webHandleAction(int fd, char *name)
 {
+    if (!strcmp(name, "reboot")) {
+        webSystemctl(fd, "reboot");
+        return;
+    }
+
+    if (!strcmp(name, "shutdown")) {
+        webSystemctl(fd, "poweroff");
+        return;
+    }
+
     // Not an SDL action: nothing for the main thread to do
     if (!strcmp(name, "reset-timer")) {
         cfgResetRunningTime();
@@ -510,7 +757,7 @@ static void webHandleAction(int fd, char *name)
         }
     }
 
-    webRespondError(fd, 404, "unknown action");
+    webRespondError(fd, 404, "unknown action, see GET /api");
 }
 
 
@@ -580,6 +827,12 @@ static void webHandleClient(int fd)
         else
             webRespondError(fd, 405, "use GET");
     }
+    else if (!strcmp(path, "/api") || !strcmp(path, "/api/")) {
+        if (isGet)
+            webRespondApi(fd);
+        else
+            webRespondError(fd, 405, "use GET");
+    }
     else if (!strcmp(path, "/api/status")) {
         if (isGet)
             webRespondStatus(fd);
@@ -607,7 +860,7 @@ static void webHandleClient(int fd)
             webRespondError(fd, 405, "use POST");
     }
     else {
-        webRespondError(fd, 404, "not found");
+        webRespondError(fd, 404, "not found, see GET /api");
     }
 }
 

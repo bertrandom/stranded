@@ -215,7 +215,16 @@ static void cfgUpdateRunningTime()
     if (!runningCounted)
         return;
 
-    uint32 seconds = (SDL_GetTicks() - runningTicks) / 1000;
+    uint32 now = SDL_GetTicks();
+
+    // SDL's ticks start again from 0 after SDL_Quit(): don't count that as
+    // 49 days (2^32 ms) going by
+    if ((sint32) (now - runningTicks) < 0) {
+        runningTicks = now;
+        return;
+    }
+
+    uint32 seconds = (now - runningTicks) / 1000;
 
     cfg.runningTime += seconds;
     runningTicks    += seconds * 1000;

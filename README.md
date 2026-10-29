@@ -68,7 +68,7 @@ Run with the `web` option to start a small web server on port 80 (or `port <n>` 
 
 Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. It serves `webui.html` from the current directory, so keep that file next to the `jc_reborn` executable. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
 
-There is no authentication: anyone who can reach the port can change the settings or quit. Only use it on a network you trust.
+There is no authentication: anyone who can reach the port can change the settings, quit, or reboot and shut down the computer if jc_reborn is allowed to (see below). Only use it on a network you trust.
 
 ### Night mode
 
@@ -86,37 +86,55 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 
 | Setting      | Values           | Meaning |
 | -------------|------------------|---------|
-| `storyDay`   | 1 to 11          | Day of the story. It normally advances by one each day; a new value takes effect at the next scene |
+| `storyDay`   | 1 to 11 (a number) | Day of the story. It normally advances by one each day; a new value takes effect at the next scene |
 | `sound`      | `true` / `false` | Play sounds. Without effect if started with `nosound` |
 | `hotkeys`    | `true` / `false` | Enable hot keys. When off, any key press quits |
 | `debug`      | `true` / `false` | Print debug info. Not saved |
 | `nightMode`  | `true` / `false` | Turn the display off during night hours |
-| `nightStart` | `HH:MM`          | Start of the night, local time |
-| `nightEnd`   | `HH:MM`          | End of the night, local time |
+| `nightStart` | `"HH:MM"` (a string) | Start of the night, local time |
+| `nightEnd`   | `"HH:MM"` (a string) | End of the night, local time |
 | `cec`        | `true` / `false` | Also put the TV in standby with HDMI-CEC |
 
 ### API
 
 | Request | Effect |
 | --------|--------|
-| `GET /api/status` | Current state and settings, as JSON: what's playing (`nowPlaying`), the display's resolution (`display`), etc. |
+| `GET /api` | Every endpoint and setting, with a description, as JSON |
+| `GET /api/status` | Current state and settings, as JSON: what's playing (`nowPlaying`), the display's resolution (`display`), the git revision jc_reborn was built from (`revision`, from `git describe --always --dirty`), etc. |
 | `GET /api/screenshot` | What's on screen, as a BMP image |
-| `POST /api/settings` | Change one or more settings. Body: form-encoded, eg. `nightMode=true&nightStart=22:00`. Either all of them are applied or, on error, none |
+| `POST /api/settings` | Change one or more settings. Body: a JSON object, eg. `{"nightMode": true, "nightStart": "22:00"}`. Either all of them are applied or, on error, none |
 | `POST /api/pause`, `POST /api/resume`, `POST /api/toggle-pause` | Pause or resume (hot key: Space) |
 | `POST /api/step` | When paused, advance one frame (hot key: Return) |
 | `POST /api/toggle-maxspeed` | Toggle max / normal speed (hot key: M) |
 | `POST /api/next-scene` | End the current scene and play the next one (hot key: N) |
 | `POST /api/quit` | Terminate (hot key: Esc) |
+| `POST /api/restart` | Same as `quit`: run as a service with `Restart=always`, jc_reborn is started again |
+| `POST /api/reboot`, `POST /api/shutdown` | Reboot or shut down the computer, with `systemctl reboot` or `systemctl poweroff` |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
 | `POST /api/reset-timer` | Reset the "stranded for" timer to zero |
+
+Rebooting and shutting down go through systemd, so jc_reborn needs to be allowed to. Run by an unprivileged user (here, `johnny`), that takes a polkit rule such as `/etc/polkit-1/rules.d/50-jc_reborn.rules`:
+
+    polkit.addRule(function(action, subject) {
+        if (subject.user == "johnny" &&
+            (action.id == "org.freedesktop.login1.reboot" ||
+             action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
+             action.id == "org.freedesktop.login1.power-off" ||
+             action.id == "org.freedesktop.login1.power-off-multiple-sessions")) {
+            return polkit.Result.YES;
+        }
+    });
+
+Otherwise, these requests fail with a 500 error.
 
 The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown on the page as how long Johnny has been stranded. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
 
 Every request except `quit` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
     curl http://pijohnny/api/status
-    curl -d nightMode=true -d nightStart=22:00 -d nightEnd=08:00 http://pijohnny/api/settings
+    curl http://pijohnny/api
+    curl -H 'Content-Type: application/json' -d '{"nightMode": true, "nightStart": "22:00", "nightEnd": "08:00"}' http://pijohnny/api/settings
     curl -X POST http://pijohnny/api/toggle-pause
 
 

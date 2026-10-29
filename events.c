@@ -44,7 +44,7 @@ int evSkipScene = 0;   // set to end the current scene and play the next one
 
 static void eventsQuit()
 {
-    cfgSaveRunningTime(1);
+    cfgCountRunningTime(0);     // save it, and stop counting: SDL is about to quit
     graphicsEnd();
     exit(255);
 }
