@@ -70,6 +70,8 @@ static void usage()
         printf("         hotkeys    - enable hot keys\n");
         printf("         web        - run a settings page and API on port %d\n", WEB_DEFAULT_PORT);
         printf("         port <n>   - run the web server on port <n> instead\n");
+        printf("         aspect <w>:<h> - draw for this aspect ratio, eg. 16:9, instead\n");
+        printf("                      of the display's. 4:3 never widens the picture\n");
         printf("\n");
         printf(" While-playing hot-keys (if enabled):\n");
         printf("         Esc        - Terminate immediately\n");
@@ -148,6 +150,12 @@ static void parseArgs(int argc, char **argv)
             }
             else if (!strcmp(argv[i], "port")) {
                 if (i + 1 >= argc || (webPort = atoi(argv[++i])) <= 0)
+                    usage();
+            }
+            else if (!strcmp(argv[i], "aspect")) {
+                if (i + 1 >= argc
+                        || sscanf(argv[++i], "%d:%d", &grAspectW, &grAspectH) != 2
+                        || grAspectW <= 0 || grAspectH <= 0)
                     usage();
             }
         }

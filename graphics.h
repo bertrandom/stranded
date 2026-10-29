@@ -76,6 +76,10 @@ extern int grDx;
 extern int grDy;
 extern int grWindowed;
 extern int grUpdateDelay;
+extern int grAspectW;
+extern int grAspectH;
+extern int grWidth;
+extern int grMarginX;
 
 
 void graphicsInit();

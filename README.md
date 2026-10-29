@@ -51,6 +51,12 @@ By default, the engine runs full screen and plays the life of Johnny on his isla
 
 To control it from a browser or turn the display off at night, see [Web control and night mode](#web-control-and-night-mode) below.
 
+### Widescreen displays
+
+The original scenes are 640x480 (4:3). On a wider display, such as 16:9, the picture isn't stretched: the scene is drawn in the middle, and in the open ocean scenes the ocean and sky are extended to the sides of the screen, where clouds, boats and Johnny can go too. The other scenes (close-ups, the title, the ending) get black sides instead. On a 4:3 display, it looks as it always did.
+
+The display's shape is detected automatically. To override it, use the `aspect` option, eg. `aspect 16:10`, or `aspect 4:3` to never widen the picture.
+
 But, if you're curious about how the engine works, you may type `jc_reborn help` and see the different options available. Feel free to try them and explore the inner workings of Screen Antics !
 
 

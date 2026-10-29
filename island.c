@@ -75,7 +75,7 @@ void islandInit(struct TTtmThread *ttmThread)
 
     int windDirection = rand() % 2;
     int numClouds;
-    uint16 cloudX, cloudY;
+    sint16 cloudX, cloudY;
 
     grDx = grDy = 0;
 
@@ -99,17 +99,17 @@ void islandInit(struct TTtmThread *ttmThread)
         switch (cloudNo) {
 
             case 0:
-                cloudX = rand() % (640 - 129);
+                cloudX = rand() % (grWidth - 129) - grMarginX;
                 cloudY = rand() % (135 - 36 );
                 break;
 
             case 1:
-                cloudX = rand() % (640 - 192);
+                cloudX = rand() % (grWidth - 192) - grMarginX;
                 cloudY = rand() % (135 - 57 );
                 break;
 
             case 2:
-                cloudX = rand() % (640 - 264);
+                cloudX = rand() % (grWidth - 264) - grMarginX;
                 cloudY = rand() % (135 - 76 );
                 break;
         }

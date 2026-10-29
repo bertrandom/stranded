@@ -42,6 +42,13 @@
 
 
 static SDL_Window *sdl_window;
+static SDL_Renderer *sdl_renderer;
+static SDL_Texture *sdl_texture;
+
+// Everything is drawn here, then scaled to fill the display by grPresent()
+static SDL_Surface *grCanvas;
+
+static void grPresent();
 
 static uint8 ttmPalette[16][4];
 
@@ -49,14 +56,24 @@ static SDL_Surface *grSavedZonesLayer = NULL;
 
 static SDL_Surface *grSavedScreen = NULL;
 
-static SDL_Rect grScreenOrigin = { 0, 0, 0, 0 };   // TODO
-
 SDL_Surface *grBackgroundSfc = NULL;
 
 int grDx = 0;
 int grDy = 0;
 int grWindowed = 0;
 int grUpdateDelay = 0;
+
+// Aspect ratio to draw for, eg. 16:9; 0:0 means the display's
+int grAspectW = 0;
+int grAspectH = 0;
+
+// On a widescreen display, the picture is widened rather than stretched:
+// the 640x480 scene is drawn in the middle of a wider canvas, with a margin
+// of grMarginX pixels on each side. For open ocean scenes, the ocean and sky
+// are extended into the margins; other scenes keep black margins
+int grWidth = SCREEN_WIDTH;
+int grMarginX = 0;
+static int grWideScene = 0;
 
 
 static void grReleaseScreen()
@@ -79,7 +96,7 @@ static void grPutPixel(SDL_Surface *sfc, uint16 x, uint16 y, uint8 color)
     // TODO: Implement Cohen-Sutherland clipping algorithm or such for
     // grDrawLine(), and another ad hoc algorithm for grDrawCircle()
 
-    if (x>=0 && y>=0 && x<640 && y<480) {
+    if (x>=0 && y>=0 && x<sfc->w && y<sfc->h) {
 
         uint8 *pixel = (uint8*) sfc->pixels;
 
@@ -95,11 +112,11 @@ static void grPutPixel(SDL_Surface *sfc, uint16 x, uint16 y, uint8 color)
 
 static void grDrawHorizontalLine(SDL_Surface *sfc, sint16 x1, sint16 x2, sint16 y, uint8 color)
 {
-    if (y < 0 || y > 479)
+    if (y < 0 || y >= sfc->h)
         return;
 
-    x1 = x1 < 0   ? 0   : x1;
-    x2 = x2 > 639 ? 639 : x2;
+    x1 = x1 < 0 ? 0 : x1;
+    x2 = x2 >= sfc->w ? sfc->w - 1 : x2;
 
     for (int x=x1; x<=x2; x++)
         grPutPixel(sfc, x, y, color);
@@ -120,29 +137,70 @@ void grLoadPalette(struct TPalResource *palResource)
 }
 
 
+// Widen the canvas to the display's aspect ratio, if it's wider than 4:3
+static void grInitWidth()
+{
+    int aspectW = grAspectW;
+    int aspectH = grAspectH;
+    SDL_DisplayMode mode;
+
+    if (!aspectW || !aspectH) {
+        if (SDL_GetDesktopDisplayMode(0, &mode))
+            return;
+        aspectW = mode.w;
+        aspectH = mode.h;
+    }
+
+    int width = (SCREEN_HEIGHT * aspectW / aspectH) & ~1;
+
+    // Beyond 638 pixels, there's not enough of the scene to mirror
+    if (width > SCREEN_WIDTH)
+        grMarginX = (width - SCREEN_WIDTH) / 2 > SCREEN_WIDTH - 2 ? SCREEN_WIDTH - 2 : (width - SCREEN_WIDTH) / 2;
+
+    grWidth = SCREEN_WIDTH + 2 * grMarginX;
+}
+
+
 void graphicsInit()
 {
     SDL_Init(SDL_INIT_VIDEO);
 
+    grInitWidth();
+
+    // Full screen at the display's own resolution, rather than switching to
+    // a 640x480 mode: the picture is scaled up by the renderer instead
     sdl_window = SDL_CreateWindow(
         "Johnny Reborn ...?",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        SCREEN_WIDTH,
+        grWidth,
         SCREEN_HEIGHT,
-        (grWindowed ? 0 : SDL_WINDOW_FULLSCREEN)
+        (grWindowed ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP)
     );
 
     if (sdl_window == NULL)
         fatalError("Could not create window: %s", SDL_GetError());
 
-    grScreenOrigin.x = (SCREEN_WIDTH - 640) / 2;
-    grScreenOrigin.y = (SCREEN_HEIGHT - 480) / 2;
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+
+    sdl_renderer = SDL_CreateRenderer(sdl_window, -1, 0);
+
+    if (sdl_renderer == NULL)
+        fatalError("Could not create renderer: %s", SDL_GetError());
+
+    SDL_RenderSetLogicalSize(sdl_renderer, grWidth, SCREEN_HEIGHT);
+
+    sdl_texture = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_RGB888,
+                                    SDL_TEXTUREACCESS_STREAMING, grWidth, SCREEN_HEIGHT);
+    grCanvas = SDL_CreateRGBSurfaceWithFormat(0, grWidth, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_RGB888);
+
+    if (sdl_texture == NULL || grCanvas == NULL)
+        fatalError("Could not create canvas: %s", SDL_GetError());
 
     if (!grWindowed)
         SDL_ShowCursor(SDL_DISABLE);
 
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 
     grLoadPalette(palResources[0]);  // TODO ?
 
@@ -154,14 +212,27 @@ void graphicsInit()
 
 void graphicsEnd()
 {
+    SDL_FreeSurface(grCanvas);
+    SDL_DestroyTexture(sdl_texture);
+    SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();
 }
 
 
+// Show the canvas, scaled to the window
+static void grPresent()
+{
+    SDL_UpdateTexture(sdl_texture, NULL, grCanvas->pixels, grCanvas->pitch);
+    SDL_RenderClear(sdl_renderer);
+    SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+    SDL_RenderPresent(sdl_renderer);
+}
+
+
 void grRefreshDisplay()
 {
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 }
 
 
@@ -174,11 +245,11 @@ void grToggleFullScreen()
         SDL_ShowCursor(SDL_ENABLE);
     }
     else {
-        SDL_SetWindowFullscreen(sdl_window, SDL_WINDOW_FULLSCREEN);
+        SDL_SetWindowFullscreen(sdl_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
         SDL_ShowCursor(SDL_DISABLE);
     }
 
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 }
 
 
@@ -236,11 +307,11 @@ static void grSetDpms(int on)
 // current picture to restore it later
 void grDisplayOff()
 {
-    SDL_Surface *sfc = SDL_GetWindowSurface(sdl_window);
+    SDL_Surface *sfc = grCanvas;
 
     grSavedScreen = SDL_ConvertSurface(sfc, sfc->format, 0);
     SDL_FillRect(sfc, NULL, SDL_MapRGB(sfc->format, 0, 0, 0));
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 
     grSetDpms(0);
 }
@@ -251,12 +322,12 @@ void grDisplayOn()
     grSetDpms(1);
 
     if (grSavedScreen != NULL) {
-        SDL_BlitSurface(grSavedScreen, NULL, SDL_GetWindowSurface(sdl_window), NULL);
+        SDL_BlitSurface(grSavedScreen, NULL, grCanvas, NULL);
         SDL_FreeSurface(grSavedScreen);
         grSavedScreen = NULL;
     }
 
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 }
 
 
@@ -264,49 +335,59 @@ void grUpdateDisplay(struct TTtmThread *ttmBackgroundThread,
                      struct TTtmThread *ttmThreads,
                      struct TTtmThread *ttmHolidayThread)
 {
+    SDL_Surface *sfc = grCanvas;
+
+    // Unless the scene is widened, only show its 640x480 part, with black
+    // margins
+    SDL_Rect sceneRect = { grMarginX, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+    SDL_Rect *srcRect = grWideScene ? NULL : &sceneRect;
+
+    if (!grWideScene && grMarginX) {
+        SDL_Rect margin = { 0, 0, grMarginX, SCREEN_HEIGHT };
+        SDL_FillRect(sfc, &margin, SDL_MapRGB(sfc->format, 0, 0, 0));
+        margin.x = grMarginX + SCREEN_WIDTH;
+        SDL_FillRect(sfc, &margin, SDL_MapRGB(sfc->format, 0, 0, 0));
+    }
+
     // Blit the background
-    if (grBackgroundSfc != NULL)
-        SDL_BlitSurface(grBackgroundSfc,
-                        NULL,
-                        SDL_GetWindowSurface(sdl_window),
-                        &grScreenOrigin);
+    if (grBackgroundSfc != NULL) {
+        SDL_Rect dest = { srcRect ? grMarginX : 0, 0, 0, 0 };
+        SDL_BlitSurface(grBackgroundSfc, srcRect, sfc, &dest);
+    }
 
     // If not NULL, blit the optional layer of saved zones
-    if (grSavedZonesLayer != NULL)
-        SDL_BlitSurface(grSavedZonesLayer,
-                        NULL,
-                        SDL_GetWindowSurface(sdl_window),
-                        &grScreenOrigin);
+    if (grSavedZonesLayer != NULL) {
+        SDL_Rect dest = { srcRect ? grMarginX : 0, 0, 0, 0 };
+        SDL_BlitSurface(grSavedZonesLayer, srcRect, sfc, &dest);
+    }
 
 
     // Blit successively each thread's layer
     for (int i=0; i < MAX_TTM_THREADS; i++)
-        if (ttmThreads[i].isRunning)
-            SDL_BlitSurface(ttmThreads[i].ttmLayer,
-                            NULL,
-                            SDL_GetWindowSurface(sdl_window),
-                            &grScreenOrigin);
+        if (ttmThreads[i].isRunning) {
+            SDL_Rect dest = { srcRect ? grMarginX : 0, 0, 0, 0 };
+            SDL_BlitSurface(ttmThreads[i].ttmLayer, srcRect, sfc, &dest);
+        }
 
     // Finally, blit the holiday layer
     if (ttmHolidayThread != NULL)
-        if (ttmHolidayThread->isRunning)
-            SDL_BlitSurface(ttmHolidayThread->ttmLayer,
-                            NULL,
-                            SDL_GetWindowSurface(sdl_window),
-                            &grScreenOrigin);
+        if (ttmHolidayThread->isRunning) {
+            SDL_Rect dest = { srcRect ? grMarginX : 0, 0, 0, 0 };
+            SDL_BlitSurface(ttmHolidayThread->ttmLayer, srcRect, sfc, &dest);
+        }
 
     // Wait for the tick ...
     eventsWaitTick(grUpdateDelay);
 
     // ... and refresh the display
-    SDL_UpdateWindowSurface(sdl_window);
+    grPresent();
 }
 
 
 SDL_Surface *grNewLayer()
 {
-    SDL_Surface *sfc = SDL_CreateRGBSurface(SDL_SWSURFACE, 640, 480, 32, 0, 0, 0, 0);
-    SDL_Rect dest = { 0, 0, 640, 480 };
+    SDL_Surface *sfc = SDL_CreateRGBSurface(SDL_SWSURFACE, grWidth, 480, 32, 0, 0, 0, 0);
+    SDL_Rect dest = { 0, 0, grWidth, 480 };
     SDL_FillRect(sfc, &dest, SDL_MapRGB(sfc->format, 0xa8, 0, 0xa8));
     SDL_SetColorKey(sfc, SDL_TRUE, SDL_MapRGB(sfc->format, 0xa8, 0, 0xa8));
 
@@ -322,8 +403,16 @@ void grFreeLayer(SDL_Surface *sfc)
 
 void grSetClipZone(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2)
 {
-    x1 += grDx; y1 += grDy;
-    x2 += grDx; y2 += grDy;
+    // In a widened scene, a zone reaching the edge of the 640x480 scene
+    // reaches the edge of the widened one, so that sprites aren't cut off
+    // in the middle of the ocean
+    if (grWideScene && x1 <= 0)
+        x1 = -grMarginX;
+    if (grWideScene && x2 >= SCREEN_WIDTH - 1)
+        x2 = SCREEN_WIDTH + grMarginX;
+
+    x1 += grDx + grMarginX; y1 += grDy;
+    x2 += grDx + grMarginX; y2 += grDy;
 
     SDL_Rect rect = { x1, y1, x2-x1, y2-y1 };
     SDL_SetClipRect(sfc, &rect);
@@ -332,7 +421,7 @@ void grSetClipZone(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2)
 
 void grCopyZoneToBg(SDL_Surface *sfc, uint16 x, uint16 y, uint16 width, uint16 height)
 {
-    x += grDx; y += grDy;
+    x += grDx + grMarginX; y += grDy;
     SDL_Rect rect = { (short) x, (short) y, width + 2, height };
 
     if (grSavedZonesLayer == NULL)
@@ -375,15 +464,15 @@ void grRestoreZone(SDL_Surface *sfc, uint16 x, uint16 y, uint16 width, uint16 he
 
 void grDrawPixel(SDL_Surface *sfc, sint16 x, sint16 y, uint8 color)
 {
-    x += grDx; y += grDy;
+    x += grDx + grMarginX; y += grDy;
     grPutPixel(sfc, x, y, color);
 }
 
 
 void grDrawLine(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2, uint8 color)
 {
-    x1 += grDx; y1 += grDy;
-    x2 += grDx; y2 += grDy;
+    x1 += grDx + grMarginX; y1 += grDy;
+    x2 += grDx + grMarginX; y2 += grDy;
 
     SDL_LockSurface(sfc);
 
@@ -440,7 +529,7 @@ void grDrawLine(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2, ui
 
 void grDrawRect(SDL_Surface *sfc, sint16 x, sint16 y, uint16 width, uint16 height, uint8 color)
 {
-    x += grDx; y += grDy;
+    x += grDx + grMarginX; y += grDy;
 
     SDL_Rect dest = { x, y, width, height };
     SDL_FillRect(sfc,
@@ -456,7 +545,7 @@ void grDrawRect(SDL_Surface *sfc, sint16 x, sint16 y, uint16 width, uint16 heigh
 
 void grDrawCircle(SDL_Surface *sfc, sint16 x1, sint16 y1, uint16 width, uint16 height, uint8 fgColor, uint8 bgColor)
 {
-    x1 += grDx; y1 += grDy;
+    x1 += grDx + grMarginX; y1 += grDy;
 
     // We can only draw regular circles
     if (width != height) {
@@ -548,7 +637,7 @@ void grDrawSprite(SDL_Surface *sfc, struct TTtmSlot *ttmSlot, sint16 x, sint16 y
         return;
     }
 
-    x += grDx; y += grDy;
+    x += grDx + grMarginX; y += grDy;
 
     SDL_Surface *srcSfc = ttmSlot->sprites[imageNo][spriteNo];
 
@@ -564,7 +653,7 @@ void grDrawSpriteFlip(SDL_Surface *sfc, struct TTtmSlot *ttmSlot, sint16 x, sint
         return;
     }
 
-    x += grDx; y += grDy;
+    x += grDx + grMarginX; y += grDy;
 
     SDL_Surface *srcSfc = ttmSlot->sprites[imageNo][spriteNo];
     x += srcSfc->w - 1;
@@ -610,20 +699,51 @@ void grLoadScreen(char *strArg)
 
     uint16 width  = scrResource->width;
     uint16 height = scrResource->height;
+    uint16 sfcWidth = width + 2 * grMarginX;
 
-    uint8 *outData = safe_malloc(width * height * sizeof(uint32));
+    uint8 *outData = safe_malloc(sfcWidth * height * sizeof(uint32));
+    memset(outData, 0, sfcWidth * height * sizeof(uint32));
 
     uint8 *inPtr  = scrResource->uncompressedData;
-    uint8 *outPtr = outData;
 
-    for (int inOffset=0; inOffset < width*height/2; inOffset++) {
-        memcpy(outPtr, ttmPalette[(inPtr[0] & 0xf0) >> 4] , 4); outPtr += 4;
-        memcpy(outPtr, ttmPalette[(inPtr[0] & 0x0f)     ] , 4); outPtr += 4;
-        inPtr++;
+    for (int y=0; y < height; y++) {
+
+        uint8 *outPtr = outData + (y * sfcWidth + grMarginX) * sizeof(uint32);
+
+        for (int x=0; x < width/2; x++) {
+            memcpy(outPtr, ttmPalette[(inPtr[0] & 0xf0) >> 4] , 4); outPtr += 4;
+            memcpy(outPtr, ttmPalette[(inPtr[0] & 0x0f)     ] , 4); outPtr += 4;
+            inPtr++;
+        }
+    }
+
+    // Only the open ocean scenes are extended: the others have something
+    // other than ocean and sky on their edges (eg. a part of the island)
+    grWideScene = grMarginX > 0 && grMarginX < width
+                  && (!strncmp(strArg, "OCEAN", 5) || !strcmp(strArg, "NIGHT.SCR"));
+
+    // Extend the ocean and sky by mirroring the edges of the scene. Their
+    // outermost columns have stray pixels, which would show as a line
+    // once mirrored, so they're replaced first
+    if (grWideScene) {
+        for (int y=0; y < height; y++) {
+
+            uint32 *row   = (uint32 *) outData + y * sfcWidth;
+            uint32 *left  = row + grMarginX;
+            uint32 *right = row + grMarginX + width - 1;
+
+            left[0]  = left[2];
+            right[0] = right[-2];
+
+            for (int k=1; k <= grMarginX; k++) {
+                left[-k]  = left[k];
+                right[k]  = right[-k];
+            }
+        }
     }
 
     grBackgroundSfc = SDL_CreateRGBSurfaceFrom((void*)outData,
-                                      width, height, 32, 4*width, 0, 0, 0, 0);
+                                      sfcWidth, height, 32, 4*sfcWidth, 0, 0, 0, 0);
 }
 
 
@@ -635,10 +755,11 @@ void grInitEmptyBackground()
     if (grSavedZonesLayer != NULL)
         grReleaseSavedLayer();
 
-    uint8 *data = safe_malloc(640 * 480 * sizeof(uint32));
-    memset(data, 0, 640 * 480 * sizeof(uint32));
+    uint8 *data = safe_malloc(grWidth * 480 * sizeof(uint32));
+    memset(data, 0, grWidth * 480 * sizeof(uint32));
     grBackgroundSfc = SDL_CreateRGBSurfaceFrom((void*)data,
-                                      640, 480, 32, 4*640, 0, 0, 0, 0);
+                                      grWidth, 480, 32, 4*grWidth, 0, 0, 0, 0);
+    grWideScene = 0;
 }
 
 
@@ -692,9 +813,12 @@ void grLoadBmp(struct TTtmSlot *ttmSlot, uint16 slotNo, char *strArg)
 void grFadeOut()
 {
     static int fadeOutType = 0;
-    SDL_Surface *sfc = SDL_GetWindowSurface(sdl_window);
+    SDL_Surface *sfc = grCanvas;
     SDL_Surface *tmpSfc = grNewLayer();
 
+
+    // In a widened scene, the margins are faded out too
+    int margin = grWideScene ? grMarginX : 0;
 
     grDx = grDy = 0;
 
@@ -704,49 +828,49 @@ void grFadeOut()
         case 0:
             // Note: we use tmpSfc to be sure we have a 32bpp surface,
             // which is needed by grDrawCircle()
-            for (int radius=20; radius <= 400; radius += 20) {
+            for (int radius=20; radius <= 400 + margin; radius += 20) {
                 grDrawCircle(tmpSfc, 320 - radius, 240 - radius,
                     radius << 1, radius << 1, 5, 5);
-                SDL_BlitSurface(tmpSfc, NULL, sfc, &grScreenOrigin);
+                SDL_BlitSurface(tmpSfc, NULL, sfc, NULL);
                 eventsWaitTick(1);
-                SDL_UpdateWindowSurface(sdl_window);
+                grPresent();
             }
             break;
 
         // Rectangle from center
         case 1:
-            for (int i=1; i <= 20; i++) {
-                grDrawRect(sfc, grScreenOrigin.x + 320 - i*16, grScreenOrigin.y + 240 - i*12, i*32, i*24, 5);
+            for (int i=1; i <= 20 + (margin + 15) / 16; i++) {
+                grDrawRect(sfc, 320 - i*16, 240 - i*12, i*32, i*24, 5);
                 eventsWaitTick(1);
-                SDL_UpdateWindowSurface(sdl_window);
+                grPresent();
             }
             break;
 
         // Right to left
         case 2:
-            for (int i=600; i >= 0; i -= 40) {
-                grDrawRect(sfc, grScreenOrigin.x + i, grScreenOrigin.y, 40, 480, 5);
+            for (int i=600 + (margin + 39) / 40 * 40; i >= -margin; i -= 40) {
+                grDrawRect(sfc, i, 0, 40, 480, 5);
                 eventsWaitTick(1);
-                SDL_UpdateWindowSurface(sdl_window);
+                grPresent();
             }
             break;
 
         // Left to right
         case 3:
-            for (int i=0; i < 640; i += 40) {
-                grDrawRect(sfc, grScreenOrigin.x + i, grScreenOrigin.y, 40, 480, 5);
+            for (int i=-(margin + 39) / 40 * 40; i < 640 + margin; i += 40) {
+                grDrawRect(sfc, i, 0, 40, 480, 5);
                 eventsWaitTick(1);
-                SDL_UpdateWindowSurface(sdl_window);
+                grPresent();
             }
             break;
 
         // Middle to left and right
         case 4:
-            for (int i=0; i < 320; i += 20) {
-                grDrawRect(sfc, grScreenOrigin.x + 320+i, grScreenOrigin.y, 20, 480, 5);
-                grDrawRect(sfc, grScreenOrigin.x + 300-i, grScreenOrigin.y, 20, 480, 5);
+            for (int i=0; i < 320 + margin; i += 20) {
+                grDrawRect(sfc, 320+i, 0, 20, 480, 5);
+                grDrawRect(sfc, 300-i, 0, 20, 480, 5);
                 eventsWaitTick(1);
-                SDL_UpdateWindowSurface(sdl_window);
+                grPresent();
             }
             break;
     }
