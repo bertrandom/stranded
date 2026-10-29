@@ -99,7 +99,7 @@
 
   <section>
     <h2>On screen</h2>
-    <img class="preview" id="preview" alt="What's on screen" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    <img class="preview" id="preview" alt="What's on screen">
     <p class="now"><span class="now-title" id="nowTitle">–</span><span class="badge" id="nowBadge" hidden></span><span class="now-detail" id="nowDetail"></span></p>
   </section>
 
@@ -263,19 +263,29 @@
   }
 
   // The preview reloads about once a second, while the page is visible,
-  // each picture once the previous one has loaded
+  // each picture once the previous one has loaded. Not while the display is
+  // off or stranded isn't responding: the preview is just black then
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  let previewPaused = false;
+
+  function pausePreview(paused) {
+    previewPaused = paused;
+    if (paused) $('preview').src = BLANK;
+  }
+
   function refreshPreview() {
     const img = $('preview');
     const next = () => setTimeout(refreshPreview, document.hidden ? 3000 : 1000);
-    if (document.hidden) return next();
+    if (document.hidden || previewPaused) return next();
     const loader = new Image();
-    loader.onload = () => { img.src = loader.src; next(); };
+    loader.onload = () => { if (!previewPaused) img.src = loader.src; next(); };
     loader.onerror = next;
     loader.src = '/api/screenshot?t=' + Date.now();
   }
 
   function render(s) {
     $('preview').classList.remove('offline');
+    pausePreview(s.asleep);
     runningTime = s.runningTime;
     runningTimeAt = Date.now();
     runningCounted = !s.asleep;
@@ -342,6 +352,7 @@
       $('nowDetail').textContent = '';
       $('nowBadge').hidden = true;
       $('preview').classList.add('offline');
+      pausePreview(true);
     }
   }
 
@@ -430,6 +441,7 @@
 
   refresh();
   setInterval(refresh, 2000);
+  $('preview').src = BLANK;
   refreshPreview();
   setInterval(tick, 250);   // often enough that no second is skipped
 </script>
