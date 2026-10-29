@@ -104,6 +104,7 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 | `POST /api/pause`, `POST /api/resume`, `POST /api/toggle-pause` | Pause or resume (hot key: Space) |
 | `POST /api/step` | When paused, advance one frame (hot key: Return) |
 | `POST /api/toggle-maxspeed` | Toggle max / normal speed (hot key: M) |
+| `POST /api/next-scene` | End the current scene and play the next one (hot key: N) |
 | `POST /api/toggle-fullscreen` | Toggle full screen / windowed mode (hot key: Alt+Return) |
 | `POST /api/quit` | Terminate (hot key: Esc) |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |

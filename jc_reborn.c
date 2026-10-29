@@ -79,6 +79,7 @@ static void usage()
         printf("         Space      - Toggle pause / unpause\n");
         printf("         Return     - When paused, advance one frame\n");
         printf("         <M>        - toggle max / normal speed\n");
+        printf("         <N>        - skip to the next scene\n");
         printf("\n");
         printf(" Settings changed from the web page are saved in ~/%s and\n", CFG_FILENAME);
         printf(" take precedence over the options above.\n");

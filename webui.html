@@ -100,6 +100,7 @@
       <button class="primary" id="pause" data-action="toggle-pause">Pause</button>
       <button id="step" data-action="step" title="Advance one frame while paused">Step</button>
       <button id="maxspeed" data-action="toggle-maxspeed">Max speed</button>
+      <button id="next" data-action="next-scene" title="End the current scene and play the next one">Next scene</button>
       <button id="fullscreen" data-action="toggle-fullscreen">Windowed</button>
       <button class="danger" data-action="quit" data-confirm="Quit jc_reborn? If it runs as a service it will restart.">Quit</button>
     </div>
@@ -199,6 +200,7 @@
 
     $('pause').textContent = s.paused ? 'Resume' : 'Pause';
     $('step').disabled = !s.paused;
+    $('next').disabled = s.asleep;
     $('maxspeed').textContent = s.maxSpeed ? 'Normal speed' : 'Max speed';
     $('fullscreen').textContent = s.fullscreen ? 'Windowed' : 'Full screen';
     $('auto').disabled = s.nightOverride === 'auto';

@@ -39,6 +39,7 @@ static uint32 evActionEventType = (uint32) -1;
 int evHotKeysEnabled = 0;
 int evPaused   = 0;
 int evMaxSpeed = 0;
+int evSkipScene = 0;   // set to end the current scene and play the next one
 
 
 static void eventsQuit()
@@ -94,6 +95,11 @@ static void eventsDoAction(int action)
             nightSetOverride(NIGHT_AUTO);
             break;
 
+        case EV_ACTION_NEXT_SCENE:
+            if (!nightAsleep)
+                evSkipScene = 1;
+            break;
+
         case EV_ACTION_SETTINGS:
             cfgApply();
             nightScheduleChanged();
@@ -129,6 +135,10 @@ static void eventsProcessEvents()
 
                         case SDLK_m:
                             eventsDoAction(EV_ACTION_TOGGLE_MAXSPEED);
+                            break;
+
+                        case SDLK_n:
+                            eventsDoAction(EV_ACTION_NEXT_SCENE);
                             break;
 
                         case SDLK_RETURN:
@@ -196,7 +206,8 @@ void eventsWaitTick(uint16 delay)
             lastTicks = SDL_GetTicks() - delay;  // no need to wait any longer
         }
 
-        if (!((evPaused && !oneFrame)
+        // Skipping a scene doesn't wait, even when paused
+        if (evSkipScene || !((evPaused && !oneFrame)
                || (!evMaxSpeed && (SDL_GetTicks() - lastTicks < delay))))
             break;
 

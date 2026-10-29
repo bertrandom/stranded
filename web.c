@@ -89,6 +89,7 @@ static const struct {
     { "sleep",             EV_ACTION_SLEEP             },
     { "wake",              EV_ACTION_WAKE              },
     { "auto",              EV_ACTION_AUTO              },
+    { "next-scene",        EV_ACTION_NEXT_SCENE        },
 };
 
 

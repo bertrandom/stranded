@@ -32,6 +32,7 @@
 #include "graphics.h"
 #include "ttm.h"
 #include "island.h"
+#include "events.h"
 #include "walk.h"
 #include "bench.h"
 #include "ads.h"
@@ -680,7 +681,7 @@ void adsPlay(char *adsName, uint16 adsTag)
     adsPlayChunk(data, dataSize, offset);
 
     // Main ADS loop
-    while (numThreads) {
+    while (numThreads && !evSkipScene) {
 
         if (ttmBackgroundThread.isRunning && ttmBackgroundThread.timer == 0) {
             debugMsg("    ------> Animate bg");
@@ -794,6 +795,13 @@ void adsPlay(char *adsName, uint16 adsTag)
             }
         }
     }
+
+    // Skipped: stop what's still running. evSkipScene stays set to skip the
+    // walk to the next scene (or the fade out) too, and is cleared there
+    if (evSkipScene)
+        for (int i=0; i < MAX_TTM_THREADS; i++)
+            if (ttmThreads[i].isRunning)
+                adsStopScene(i);
 
     for (int i=0; i < MAX_TTM_SLOTS; i++)
         ttmResetSlot(&ttmSlots[i]);
@@ -923,7 +931,8 @@ void adsPlayWalk(int fromSpot, int fromHdg, int toSpot, int toHdg)
 
     ttmThreads[0].delay = walkAnimate(&ttmThreads[0], ttmBackgroundThread.ttmSlot);
 
-    while (ttmThreads[0].delay) {
+    // Skipping during the walk goes straight to the next scene
+    while (ttmThreads[0].delay && !evSkipScene) {
 
         // Call each thread which timer reaches 0
         if (!ttmBackgroundThread.timer) {
@@ -956,6 +965,7 @@ void adsPlayWalk(int fromSpot, int fromHdg, int toSpot, int toHdg)
         grUpdateDelay = mini;
     }
 
+    evSkipScene = 0;
     adsStopScene(0);
 }
 

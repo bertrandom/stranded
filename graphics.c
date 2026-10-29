@@ -877,6 +877,9 @@ void grFadeOut()
 
     grFreeLayer(tmpSfc);
 
+    // A next scene requested during the fade out is the one that follows it
+    evSkipScene = 0;
+
     fadeOutType = (fadeOutType + 1) % 5;
 }
 

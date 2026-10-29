@@ -24,6 +24,7 @@
 extern int evHotKeysEnabled;
 extern int evPaused;
 extern int evMaxSpeed;
+extern int evSkipScene;
 
 // Actions which can be triggered from another thread (eg. the web server)
 enum {
@@ -37,6 +38,7 @@ enum {
     EV_ACTION_SLEEP,
     EV_ACTION_WAKE,
     EV_ACTION_AUTO,
+    EV_ACTION_NEXT_SCENE,
     EV_ACTION_SETTINGS
 };
 
