@@ -248,6 +248,7 @@ void storyPlay()
                 if (scene->dayNo)
                     soundPlay(0);
 
+                adsSetNowPlaying("scene", scene->adsName, scene->adsTagNo, scene->dayNo);
                 adsPlay(scene->adsName, scene->adsTagNo);
 
                 unwantedFlags |= FIRST;
@@ -270,6 +271,7 @@ void storyPlay()
         if (finalScene->dayNo)
             soundPlay(0);
 
+        adsSetNowPlaying("scene", finalScene->adsName, finalScene->adsTagNo, finalScene->dayNo);
         adsPlay(finalScene->adsName, finalScene->adsTagNo);
 
         grFadeOut();

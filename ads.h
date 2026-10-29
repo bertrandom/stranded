@@ -21,6 +21,18 @@
  *
  */
 
+// What's on screen, for the web page. Read and written under cfgLock()
+struct TNowPlaying {
+    char activity[8];       // "intro", "scene", "walk", or "" when unknown
+    char adsName[13];       // for a scene: the ADS script and tag,
+    int  adsTag;            // with the tag's description
+    char description[64];
+    int  storyDay;          // day of the story the scene belongs to, or 0
+};
+
+extern struct TNowPlaying adsNowPlaying;
+
+void adsSetNowPlaying(char *activity, char *adsName, int adsTag, int storyDay);
 void adsInit();
 void adsInitIsland();
 void adsReleaseIsland();

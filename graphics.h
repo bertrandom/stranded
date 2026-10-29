@@ -80,11 +80,15 @@ extern int grAspectW;
 extern int grAspectH;
 extern int grWidth;
 extern int grMarginX;
+extern int grDisplayWidth;
+extern int grDisplayHeight;
 
 
 void graphicsInit();
 void graphicsEnd();
 void grRefreshDisplay();
+void grServiceSnapshot();
+uint32 *grTakeSnapshot(int *width, int *height);
 void grToggleFullScreen();
 void grDisplayOff();
 void grDisplayOn();

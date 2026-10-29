@@ -66,7 +66,7 @@ Run with the `web` option to start a small web server on port 80 (or `port <n>` 
 
     jc_reborn hotkeys web
 
-Open `http://<host>/` for a settings page. It serves `webui.html` from the current directory, so keep that file next to the `jc_reborn` executable. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
+Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. It serves `webui.html` from the current directory, so keep that file next to the `jc_reborn` executable. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
 
 There is no authentication: anyone who can reach the port can change the settings or quit. Only use it on a network you trust.
 
@@ -99,13 +99,13 @@ Settings changed from the web page are saved in `~/.jc_reborn`, next to the stor
 
 | Request | Effect |
 | --------|--------|
-| `GET /api/status` | Current state and settings, as JSON |
+| `GET /api/status` | Current state and settings, as JSON: what's playing (`nowPlaying`), the display's resolution (`display`), etc. |
+| `GET /api/screenshot` | What's on screen, as a BMP image |
 | `POST /api/settings` | Change one or more settings. Body: form-encoded, eg. `nightMode=true&nightStart=22:00`. Either all of them are applied or, on error, none |
 | `POST /api/pause`, `POST /api/resume`, `POST /api/toggle-pause` | Pause or resume (hot key: Space) |
 | `POST /api/step` | When paused, advance one frame (hot key: Return) |
 | `POST /api/toggle-maxspeed` | Toggle max / normal speed (hot key: M) |
 | `POST /api/next-scene` | End the current scene and play the next one (hot key: N) |
-| `POST /api/toggle-fullscreen` | Toggle full screen / windowed mode (hot key: Alt+Return) |
 | `POST /api/quit` | Terminate (hot key: Esc) |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |

@@ -70,6 +70,18 @@
   .timer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .elapsed { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .night-state { margin: 12px 0 0; color: var(--muted); font-size: .9rem; }
+  .preview {
+    display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
+    background: #000; border-radius: 8px;
+  }
+  .now { margin: 12px 0 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .now-title { font-weight: 600; }
+  .now-detail { color: var(--muted); font-size: .85rem; }
+  .badge {
+    font-size: .75rem; padding: 2px 8px; border-radius: 999px;
+    background: var(--accent); color: var(--accent-text);
+  }
+  .value { color: var(--muted); text-align: right; }
   #toast {
     position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
     background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px;
@@ -83,6 +95,12 @@
 <main>
   <h1>Johnny Castaway</h1>
   <p class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></p>
+
+  <section>
+    <h2>On screen</h2>
+    <img class="preview" id="preview" alt="What's on screen" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    <p class="now"><span class="now-title" id="nowTitle">–</span><span class="badge" id="nowBadge" hidden></span><span class="now-detail" id="nowDetail"></span></p>
+  </section>
 
   <section>
     <h2>Johnny has been stranded for</h2>
@@ -101,7 +119,6 @@
       <button id="step" data-action="step" title="Advance one frame while paused">Step</button>
       <button id="maxspeed" data-action="toggle-maxspeed">Max speed</button>
       <button id="next" data-action="next-scene" title="End the current scene and play the next one">Next scene</button>
-      <button id="fullscreen" data-action="toggle-fullscreen">Windowed</button>
       <button class="danger" data-action="quit" data-confirm="Quit jc_reborn? If it runs as a service it will restart.">Quit</button>
     </div>
   </section>
@@ -150,6 +167,10 @@
       <label for="debug">Debug output<span class="hint">Not saved across restarts</span></label>
       <input type="checkbox" id="debug" data-setting="debug">
     </div>
+    <div class="row">
+      <label>Resolution<span class="hint">The picture is scaled up to fill the display</span></label>
+      <span class="value" id="resolution">–</span>
+    </div>
   </section>
 </main>
 <div id="toast"></div>
@@ -187,6 +208,51 @@
     $('elapsed').textContent = formatElapsed(runningTime + sinceUpdate);
   }
 
+  // Scene descriptions come from the game's files, in capitals
+  function sentenceCase(text) {
+    const lower = text.trim().toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+
+  // Plain names for scenes whose description in the game's files is cryptic
+  function sceneName(now) {
+    if (now.ads === 'STAND.ADS')
+      return now.tag >= 15 ? 'Looking through the telescope' : 'Standing around';
+    return now.description ? sentenceCase(now.description) : now.ads;
+  }
+
+  function renderNowPlaying(s) {
+    const now = s.nowPlaying;
+    let title, detail = '';
+
+    if (s.asleep) title = 'Display off for the night';
+    else if (now.activity === 'intro') title = 'Title screen';
+    else if (now.activity === 'walk') title = 'Walking to the next scene';
+    else if (now.activity === 'scene') {
+      title = sceneName(now);
+      detail = `${now.ads} #${now.tag}` + (now.ads === 'STAND.ADS' ? ` · ${now.description}` : '');
+    }
+    else title = '–';
+
+    $('nowTitle').textContent = title;
+    $('nowDetail').textContent = detail;
+    const badge = $('nowBadge');
+    badge.hidden = !(now.activity === 'scene' && now.storyDay && !s.asleep);
+    badge.textContent = `Day ${now.storyDay} of the story`;
+  }
+
+  // The preview reloads about once a second, while the page is visible,
+  // each picture once the previous one has loaded
+  function refreshPreview() {
+    const img = $('preview');
+    const next = () => setTimeout(refreshPreview, document.hidden ? 3000 : 1000);
+    if (document.hidden) return next();
+    const loader = new Image();
+    loader.onload = () => { img.src = loader.src; next(); };
+    loader.onerror = next;
+    loader.src = '/api/screenshot?t=' + Date.now();
+  }
+
   function render(s) {
     runningTime = s.runningTime;
     runningTimeAt = Date.now();
@@ -202,7 +268,6 @@
     $('step').disabled = !s.paused;
     $('next').disabled = s.asleep;
     $('maxspeed').textContent = s.maxSpeed ? 'Normal speed' : 'Max speed';
-    $('fullscreen').textContent = s.fullscreen ? 'Windowed' : 'Full screen';
     $('auto').disabled = s.nightOverride === 'auto';
 
     const settings = s.settings;
@@ -213,6 +278,15 @@
       else el.value = value;
     }
     $('sound').disabled = !s.soundAvailable;
+
+    renderNowPlaying(s);
+
+    const d = s.display;
+    $('resolution').textContent =
+      d.width && (d.width !== d.pictureWidth || d.height !== d.pictureHeight)
+        ? `${d.width} × ${d.height}, drawn at ${d.pictureWidth} × ${d.pictureHeight}`
+        : `${d.pictureWidth} × ${d.pictureHeight}`;
+    $('preview').style.aspectRatio = `${d.pictureWidth} / ${d.pictureHeight}`;
 
     let night;
     if (s.nightOverride === 'sleep') night = 'Display turned off by hand until the next scheduled switch.';
@@ -274,6 +348,7 @@
 
   refresh();
   setInterval(refresh, 2000);
+  refreshPreview();
   setInterval(tick, 250);   // often enough that no second is skipped
 </script>
 </body>

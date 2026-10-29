@@ -33,6 +33,7 @@
 #include "ttm.h"
 #include "island.h"
 #include "events.h"
+#include "config.h"
 #include "walk.h"
 #include "bench.h"
 #include "ads.h"
@@ -85,6 +86,30 @@ static int    adsNumRandOps    = 0;
 
 static int    numThreads       = 0;
 static int    adsStopRequested = 0;
+
+struct TNowPlaying adsNowPlaying;
+
+
+void adsSetNowPlaying(char *activity, char *adsName, int adsTag, int storyDay)
+{
+    char *description = "";
+
+    if (adsName != NULL) {
+        struct TAdsResource *adsResource = findAdsResource(adsName);
+
+        for (int i=0; i < adsResource->numTags; i++)
+            if (adsResource->tags[i].id == adsTag)
+                description = adsResource->tags[i].description;
+    }
+
+    cfgLock();
+    snprintf(adsNowPlaying.activity, sizeof(adsNowPlaying.activity), "%s", activity);
+    snprintf(adsNowPlaying.adsName, sizeof(adsNowPlaying.adsName), "%s", adsName ? adsName : "");
+    adsNowPlaying.adsTag = adsTag;
+    snprintf(adsNowPlaying.description, sizeof(adsNowPlaying.description), "%s", description);
+    adsNowPlaying.storyDay = storyDay;
+    cfgUnlock();
+}
 
 
 static void adsLoad(uint8 *data, uint32 dataSize, uint16 numTags, uint16 tag, uint32 *tagOffset)
@@ -862,6 +887,7 @@ void adsPlayBench()  // TODO - tempo
 
 void adsPlayIntro()
 {
+    adsSetNowPlaying("intro", NULL, 0, 0);
     grLoadScreen("INTRO.SCR");
     grUpdateDelay = 100;
     grUpdateDisplay(NULL, ttmThreads, NULL);
@@ -919,6 +945,7 @@ void adsNoIsland()
 
 void adsPlayWalk(int fromSpot, int fromHdg, int toSpot, int toHdg)
 {
+    adsSetNowPlaying("walk", NULL, 0, 0);
     adsAddScene(0,0,0);
     grLoadBmp(ttmSlots, 0, "JOHNWALK.BMP");
 

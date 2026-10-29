@@ -113,6 +113,7 @@ static void eventsProcessEvents()
     SDL_Event event;
 
     cfgSaveRunningTime(0);
+    grServiceSnapshot();
 
     while (SDL_PollEvent(&event)) {
 

@@ -50,6 +50,14 @@ static SDL_Surface *grCanvas;
 
 static void grPresent();
 
+// Snapshots of the canvas for other threads (the web page's preview): the
+// main thread copies the canvas when asked, from grServiceSnapshot()
+static SDL_mutex *grSnapshotLock;
+static SDL_cond  *grSnapshotDone;
+static int       grSnapshotRequested = 0;
+static uint32    grSnapshotCount = 0;
+static uint32    *grSnapshotPixels = NULL;
+
 static uint8 ttmPalette[16][4];
 
 static SDL_Surface *grSavedZonesLayer = NULL;
@@ -73,6 +81,10 @@ int grAspectH = 0;
 // are extended into the margins; other scenes keep black margins
 int grWidth = SCREEN_WIDTH;
 int grMarginX = 0;
+
+// Size of the window, or of the display when full screen
+int grDisplayWidth = 0;
+int grDisplayHeight = 0;
 static int grWideScene = 0;
 
 
@@ -197,6 +209,12 @@ void graphicsInit()
     if (sdl_texture == NULL || grCanvas == NULL)
         fatalError("Could not create canvas: %s", SDL_GetError());
 
+    SDL_GetRendererOutputSize(sdl_renderer, &grDisplayWidth, &grDisplayHeight);
+
+    grSnapshotLock   = SDL_CreateMutex();
+    grSnapshotDone   = SDL_CreateCond();
+    grSnapshotPixels = safe_malloc(grWidth * SCREEN_HEIGHT * sizeof(uint32));
+
     if (!grWindowed)
         SDL_ShowCursor(SDL_DISABLE);
 
@@ -230,6 +248,58 @@ static void grPresent()
 }
 
 
+// Called regularly by the main thread: copy the canvas if a snapshot was
+// requested
+void grServiceSnapshot()
+{
+    if (grSnapshotLock == NULL || !grSnapshotRequested)
+        return;
+
+    SDL_LockMutex(grSnapshotLock);
+
+    for (int y=0; y < SCREEN_HEIGHT; y++)
+        memcpy(grSnapshotPixels + y * grWidth,
+               (uint8 *) grCanvas->pixels + y * grCanvas->pitch,
+               grWidth * sizeof(uint32));
+
+    grSnapshotRequested = 0;
+    grSnapshotCount++;
+    SDL_CondBroadcast(grSnapshotDone);
+    SDL_UnlockMutex(grSnapshotLock);
+}
+
+
+// From any thread: get a copy of what's on screen, as 0x00RRGGBB pixels,
+// to free() afterwards. NULL if the main thread didn't answer in time
+uint32 *grTakeSnapshot(int *width, int *height)
+{
+    uint32 *pixels = NULL;
+
+    if (grSnapshotLock == NULL)
+        return NULL;
+
+    SDL_LockMutex(grSnapshotLock);
+
+    uint32 count = grSnapshotCount;
+    grSnapshotRequested = 1;
+
+    while (count == grSnapshotCount)
+        if (SDL_CondWaitTimeout(grSnapshotDone, grSnapshotLock, 2000) == SDL_MUTEX_TIMEDOUT)
+            break;
+
+    if (count != grSnapshotCount) {
+        pixels = safe_malloc(grWidth * SCREEN_HEIGHT * sizeof(uint32));
+        memcpy(pixels, grSnapshotPixels, grWidth * SCREEN_HEIGHT * sizeof(uint32));
+        *width  = grWidth;
+        *height = SCREEN_HEIGHT;
+    }
+
+    SDL_UnlockMutex(grSnapshotLock);
+
+    return pixels;
+}
+
+
 void grRefreshDisplay()
 {
     grPresent();
@@ -248,6 +318,8 @@ void grToggleFullScreen()
         SDL_SetWindowFullscreen(sdl_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
         SDL_ShowCursor(SDL_DISABLE);
     }
+
+    SDL_GetRendererOutputSize(sdl_renderer, &grDisplayWidth, &grDisplayHeight);
 
     grPresent();
 }

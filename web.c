@@ -42,6 +42,7 @@
 #include "sound.h"
 #include "config.h"
 #include "night.h"
+#include "ads.h"
 #include "web.h"
 
 
@@ -69,7 +70,7 @@ void webInit()
 #include <netinet/in.h>
 
 #define REQUEST_LEN     8192
-#define RESPONSE_LEN    2048
+#define RESPONSE_LEN    4096
 #define PAGE_FILENAME   "webui.html"
 
 #define JSON_BOOL(x)    ((x) ? "true" : "false")
@@ -84,7 +85,6 @@ static const struct {
     { "toggle-pause",      EV_ACTION_TOGGLE_PAUSE      },
     { "step",              EV_ACTION_STEP              },
     { "toggle-maxspeed",   EV_ACTION_TOGGLE_MAXSPEED   },
-    { "toggle-fullscreen", EV_ACTION_TOGGLE_FULLSCREEN },
     { "quit",              EV_ACTION_QUIT              },
     { "sleep",             EV_ACTION_SLEEP             },
     { "wake",              EV_ACTION_WAKE              },
@@ -148,15 +148,42 @@ static void webRespondError(int fd, int status, const char *message)
 }
 
 
+// Copy a string for a JSON string value, escaping what needs to be
+static void webJsonEscape(char *out, size_t outLen, const char *in)
+{
+    size_t n = 0;
+
+    for (; *in && n + 7 < outLen; in++) {
+        if (*in == '"' || *in == '\\') {
+            out[n++] = '\\';
+            out[n++] = *in;
+        }
+        else if ((unsigned char) *in < 0x20) {
+            n += snprintf(out + n, outLen - n, "\\u%04x", *in);
+        }
+        else {
+            out[n++] = *in;
+        }
+    }
+
+    out[n] = 0;
+}
+
+
 static void webRespondStatus(int fd)
 {
     char body[RESPONSE_LEN];
     struct TConfig c;
+    struct TNowPlaying nowPlaying;
+    char description[sizeof(nowPlaying.description) * 6 + 1];
     char *override;
 
     cfgLock();
     c = cfg;
+    nowPlaying = adsNowPlaying;
     cfgUnlock();
+
+    webJsonEscape(description, sizeof(description), nowPlaying.description);
 
     switch (nightOverride) {
         case NIGHT_FORCE_SLEEP: override = "sleep"; break;
@@ -168,12 +195,24 @@ static void webRespondStatus(int fd)
         "{\n"
         "  \"paused\": %s,\n"
         "  \"maxSpeed\": %s,\n"
-        "  \"fullscreen\": %s,\n"
         "  \"soundAvailable\": %s,\n"
         "  \"asleep\": %s,\n"
         "  \"nightScheduled\": %s,\n"
         "  \"nightOverride\": \"%s\",\n"
         "  \"runningTime\": %lld,\n"
+        "  \"nowPlaying\": {\n"
+        "    \"activity\": \"%s\",\n"
+        "    \"ads\": \"%s\",\n"
+        "    \"tag\": %d,\n"
+        "    \"description\": \"%s\",\n"
+        "    \"storyDay\": %d\n"
+        "  },\n"
+        "  \"display\": {\n"
+        "    \"width\": %d,\n"
+        "    \"height\": %d,\n"
+        "    \"pictureWidth\": %d,\n"
+        "    \"pictureHeight\": %d\n"
+        "  },\n"
         "  \"settings\": {\n"
         "    \"storyDay\": %d,\n"
         "    \"sound\": %s,\n"
@@ -187,12 +226,20 @@ static void webRespondStatus(int fd)
         "}\n",
         JSON_BOOL(evPaused),
         JSON_BOOL(evMaxSpeed),
-        JSON_BOOL(!grWindowed),
         JSON_BOOL(!soundDisabled),
         JSON_BOOL(nightAsleep),
         JSON_BOOL(nightScheduled),
         override,
         cfgGetRunningTime(),
+        nowPlaying.activity,
+        nowPlaying.adsName,
+        nowPlaying.adsTag,
+        description,
+        nowPlaying.storyDay,
+        grDisplayWidth,
+        grDisplayHeight,
+        grWidth,
+        SCREEN_HEIGHT,
         c.currentDay,
         JSON_BOOL(c.sound),
         JSON_BOOL(c.hotkeys),
@@ -203,6 +250,92 @@ static void webRespondStatus(int fd)
         JSON_BOOL(c.cec));
 
     webRespondJson(fd, 200, body);
+}
+
+
+static void webPutUint16(uint8 *p, uint16 value)
+{
+    p[0] = value & 0xff;
+    p[1] = value >> 8;
+}
+
+
+static void webPutUint32(uint8 *p, uint32 value)
+{
+    webPutUint16(p, value & 0xffff);
+    webPutUint16(p + 2, value >> 16);
+}
+
+
+// What's on screen, as a BMP image. The game only uses a few colors, so
+// it's an 8 bits per pixel image (a quarter of the size of a true color one)
+static void webRespondScreenshot(int fd)
+{
+    int width, height;
+    uint32 *pixels = grTakeSnapshot(&width, &height);
+
+    if (pixels == NULL) {
+        webRespondError(fd, 500, "no picture available");
+        return;
+    }
+
+    uint32 palette[256];
+    int numColors = 0;
+    int rowLen = (width + 3) & ~3;
+    size_t headerLen = 14 + 40 + 256 * 4;
+    size_t len = headerLen + rowLen * height;
+    uint8 *bmp = safe_malloc(len);
+
+    memset(bmp, 0, len);
+
+    // Pixels, bottom-up, as indexes in the palette. More than 256 colors
+    // isn't expected: the extra ones are drawn with the last one
+    for (int y=0; y < height; y++) {
+
+        uint8 *row = bmp + headerLen + (height - 1 - y) * rowLen;
+
+        for (int x=0; x < width; x++) {
+
+            uint32 color = pixels[y * width + x] & 0xffffff;
+            int i = row[x - (x > 0)];   // most often, the same color as on the left
+
+            if (x == 0 || palette[i] != color)
+                for (i=0; i < numColors && palette[i] != color; i++)
+                    ;
+
+            if (i == numColors) {
+                if (numColors < 256)
+                    palette[numColors++] = color;
+                else
+                    i = 255;
+            }
+
+            row[x] = i;
+        }
+    }
+
+    free(pixels);
+
+    // File header
+    bmp[0] = 'B'; bmp[1] = 'M';
+    webPutUint32(bmp + 2, len);
+    webPutUint32(bmp + 10, headerLen);
+
+    // Info header
+    webPutUint32(bmp + 14, 40);
+    webPutUint32(bmp + 18, width);
+    webPutUint32(bmp + 22, height);
+    webPutUint16(bmp + 26, 1);           // planes
+    webPutUint16(bmp + 28, 8);           // bits per pixel
+    webPutUint32(bmp + 34, rowLen * height);
+    webPutUint32(bmp + 46, 256);         // colors in the palette
+
+    // Palette, as B, G, R, 0
+    for (int i=0; i < numColors; i++)
+        webPutUint32(bmp + 54 + i * 4, palette[i]);
+
+    webRespond(fd, 200, "image/bmp", (char *) bmp, len);
+    free(bmp);
 }
 
 
@@ -450,6 +583,12 @@ static void webHandleClient(int fd)
     else if (!strcmp(path, "/api/status")) {
         if (isGet)
             webRespondStatus(fd);
+        else
+            webRespondError(fd, 405, "use GET");
+    }
+    else if (!strcmp(path, "/api/screenshot")) {
+        if (isGet)
+            webRespondScreenshot(fd);
         else
             webRespondError(fd, 405, "use GET");
     }

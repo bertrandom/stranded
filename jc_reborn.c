@@ -227,6 +227,7 @@ int main(int argc, char **argv)
         else
             adsNoIsland();
 
+        adsSetNowPlaying("scene", args[0], atoi(args[1]), 0);
         adsPlay(args[0], atoi(args[1]));
 
         soundEnd();
