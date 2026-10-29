@@ -772,6 +772,26 @@ void grClearScreen(SDL_Surface *sfc)
 }
 
 
+// The night has the moon and its reflection on the left of the scene, so
+// mirroring an edge far enough would show a second moon. Its margins are
+// filled from the part of the scene with only sky, stars and dark water
+// instead, mirrored back and forth across it. The water is dithered in a
+// checkerboard, so each margin column is taken from a column of the same
+// parity as the one the plain mirroring would have used: otherwise two
+// identical columns would meet, and show as a line
+#define NIGHT_MOONLESS_FROM 280
+#define NIGHT_MOONLESS_TO   636
+
+// The column of that part of the scene that x falls on, mirroring at its ends
+static int grMoonlessColumn(int x)
+{
+    int len = NIGHT_MOONLESS_TO - NIGHT_MOONLESS_FROM;
+    int t = (((x - NIGHT_MOONLESS_FROM) % (2 * len)) + 2 * len) % (2 * len);
+
+    return t <= len ? NIGHT_MOONLESS_FROM + t : NIGHT_MOONLESS_TO - (t - len);
+}
+
+
 void grLoadScreen(char *strArg)
 {
     if (grBackgroundSfc != NULL)
@@ -810,10 +830,12 @@ void grLoadScreen(char *strArg)
         }
     }
 
+    int night = !strcmp(strArg, "NIGHT.SCR");
+
     // Only the open ocean scenes are extended: the others have something
     // other than ocean and sky on their edges (eg. a part of the island)
     grWideScene = grMarginX > 0 && grMarginX < width
-                  && (!strncmp(strArg, "OCEAN", 5) || !strcmp(strArg, "NIGHT.SCR"));
+                  && (!strncmp(strArg, "OCEAN", 5) || night);
 
     // Extend the ocean and sky by mirroring the edges of the scene. Their
     // outermost columns have stray pixels, which would show as a line
@@ -828,9 +850,18 @@ void grLoadScreen(char *strArg)
             left[0]  = left[2];
             right[0] = right[-2];
 
-            for (int k=1; k <= grMarginX; k++) {
-                left[-k]  = left[k];
-                right[k]  = right[-k];
+            if (night) {
+                // Instead of columns k and width - 1 - k
+                for (int k=1; k <= grMarginX; k++) {
+                    left[-k] = left[grMoonlessColumn(NIGHT_MOONLESS_FROM + k)];
+                    right[k] = left[grMoonlessColumn(NIGHT_MOONLESS_TO + 1 - k)];
+                }
+            }
+            else {
+                for (int k=1; k <= grMarginX; k++) {
+                    left[-k]  = left[k];
+                    right[k]  = right[-k];
+                }
             }
         }
     }
