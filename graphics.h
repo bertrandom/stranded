@@ -82,6 +82,7 @@ extern int grWidth;
 extern int grMarginX;
 extern int grDisplayWidth;
 extern int grDisplayHeight;
+extern int grBrightness;
 
 
 void graphicsInit();

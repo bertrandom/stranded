@@ -103,6 +103,7 @@ static void eventsDoAction(int action)
         case EV_ACTION_SETTINGS:
             cfgApply();
             nightScheduleChanged();
+            grRefreshDisplay();     // so that a new brightness shows, even when paused
             break;
     }
 }

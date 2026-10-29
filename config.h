@@ -23,6 +23,8 @@
 
 #define CFG_FILENAME ".stranded"
 
+#define BRIGHTNESS_MIN 10   // not 0: a black screen would look broken
+
 struct TConfig {
     int currentDay;
     int date;
@@ -32,6 +34,7 @@ struct TConfig {
     int nightStart;     // in minutes after midnight
     int nightEnd;       // in minutes after midnight
     int cec;            // also put the TV in standby via HDMI-CEC
+    int brightness;     // in percent, from BRIGHTNESS_MIN to 100
     long long runningTime;   // seconds Johnny has been on screen, in total
 };
 

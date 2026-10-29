@@ -30,6 +30,7 @@
 #include "utils.h"
 #include "events.h"
 #include "sound.h"
+#include "graphics.h"
 #include "config.h"
 
 #define BUFFER_LEN 100
@@ -128,6 +129,12 @@ static void cfgFileRead()
         else if (strstr(buf, "cec=") == buf)
             cfg.cec = atoi(buf + 4) != 0;
 
+        else if (strstr(buf, "brightness=") == buf) {
+            int brightness = atoi(buf + 11);
+            if (brightness >= BRIGHTNESS_MIN && brightness <= 100)
+                cfg.brightness = brightness;
+        }
+
         else if (strstr(buf, "runningTime=") == buf)
             cfg.runningTime = atoll(buf + 12);
     }
@@ -150,6 +157,7 @@ void cfgInit()
     cfg.nightStart = 22 * 60;
     cfg.nightEnd   = 8 * 60;
     cfg.cec        = 1;
+    cfg.brightness = 100;
     cfg.runningTime = 0;
 
     cfgFileRead();
@@ -189,6 +197,7 @@ void cfgSave()
         fprintf(f, "nightStart=%02d:%02d\n", cfg.nightStart / 60, cfg.nightStart % 60);
         fprintf(f, "nightEnd=%02d:%02d\n", cfg.nightEnd / 60, cfg.nightEnd % 60);
         fprintf(f, "cec=%d\n", cfg.cec);
+        fprintf(f, "brightness=%d\n", cfg.brightness);
         fprintf(f, "runningTime=%lld\n", cfg.runningTime);
         fclose(f);
     }
@@ -201,6 +210,7 @@ void cfgApply()
     cfgLock();
     evHotKeysEnabled = cfg.hotkeys;
     soundMuted       = !cfg.sound;
+    grBrightness     = cfg.brightness;
     cfgUnlock();
 }
 

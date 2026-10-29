@@ -67,6 +67,9 @@
     font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   }
+  input[type=range] { width: 160px; accent-color: var(--accent); }
+  .slider { display: flex; align-items: center; gap: 8px; }
+  .slider output { min-width: 3.2em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .times { display: flex; gap: 8px; align-items: center; }
   .timer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .elapsed { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
@@ -154,6 +157,13 @@
     <div class="row">
       <label for="storyDay">Day of the story<span class="hint">Advances by one each day; takes effect at the next scene</span></label>
       <select id="storyDay" data-setting="storyDay"></select>
+    </div>
+    <div class="row">
+      <label for="brightness">Brightness</label>
+      <span class="slider">
+        <input type="range" id="brightness" data-setting="brightness" min="10" max="100" step="5">
+        <output id="brightnessValue" for="brightness">–</output>
+      </span>
     </div>
     <div class="row">
       <label for="sound">Sound</label>
@@ -306,6 +316,7 @@
       else el.value = value;
     }
     $('sound').disabled = !s.soundAvailable;
+    showBrightness();
 
     renderNowPlaying(s);
     $('revision').textContent = s.revision;
@@ -369,7 +380,7 @@
     el.addEventListener('change', async () => {
       if (el.value === '') return;
       const value = el.type === 'checkbox' ? el.checked
-                  : el.dataset.setting === 'storyDay' ? Number(el.value)
+                  : el.dataset.setting === 'storyDay' || el.type === 'range' ? Number(el.value)
                   : el.value;
       try {
         render(await call('/api/settings', {
@@ -385,6 +396,12 @@
       }
     });
   }
+
+  // The percentage follows the slider while it's dragged; it's saved on release
+  function showBrightness() {
+    $('brightnessValue').textContent = $('brightness').value + '%';
+  }
+  $('brightness').addEventListener('input', showBrightness);
 
   // Checking for updates, and installing one. The installed version shows
   // in the status's revision (eg. v2026.10.29) once stranded has restarted

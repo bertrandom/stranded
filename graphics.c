@@ -85,6 +85,9 @@ int grMarginX = 0;
 // Size of the window, or of the display when full screen
 int grDisplayWidth = 0;
 int grDisplayHeight = 0;
+
+// In percent: the picture is dimmed when it's scaled to the display
+int grBrightness = 100;
 static int grWideScene = 0;
 
 
@@ -262,7 +265,10 @@ void graphicsEnd()
 // Show the canvas, scaled to the window
 static void grPresent()
 {
+    uint8 mod = grBrightness * 255 / 100;
+
     SDL_UpdateTexture(sdl_texture, NULL, grCanvas->pixels, grCanvas->pitch);
+    SDL_SetTextureColorMod(sdl_texture, mod, mod, mod);
     SDL_RenderClear(sdl_renderer);
     SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
     SDL_RenderPresent(sdl_renderer);

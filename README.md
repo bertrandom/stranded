@@ -124,6 +124,7 @@ Settings changed from the web page are saved in `~/.stranded`, next to the story
 | `nightStart` | `"HH:MM"` (a string) | Start of the night, local time |
 | `nightEnd`   | `"HH:MM"` (a string) | End of the night, local time |
 | `cec`        | `true` / `false` | Also put the TV in standby with HDMI-CEC |
+| `brightness` | 10 to 100 (a number) | Brightness of the picture, in percent. The screenshot isn't dimmed |
 
 ### API
 

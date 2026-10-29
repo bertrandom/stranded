@@ -260,7 +260,8 @@ static void webRespondStatus(int fd)
         "    \"nightMode\": %s,\n"
         "    \"nightStart\": \"%02d:%02d\",\n"
         "    \"nightEnd\": \"%02d:%02d\",\n"
-        "    \"cec\": %s\n"
+        "    \"cec\": %s,\n"
+        "    \"brightness\": %d\n"
         "  }\n"
         "}\n",
         JSON_BOOL(evPaused),
@@ -286,7 +287,8 @@ static void webRespondStatus(int fd)
         JSON_BOOL(c.nightMode),
         c.nightStart / 60, c.nightStart % 60,
         c.nightEnd / 60, c.nightEnd % 60,
-        JSON_BOOL(c.cec));
+        JSON_BOOL(c.cec),
+        c.brightness);
 
     webRespondJson(fd, 200, body);
 }
@@ -418,6 +420,8 @@ static const struct {
     { "nightStart", "string",  "\"format\": \"HH:MM\"", "Start of the night, local time" },
     { "nightEnd",   "string",  "\"format\": \"HH:MM\"", "End of the night, local time" },
     { "cec",        "boolean", NULL, "Also put the TV in standby with HDMI-CEC" },
+    { "brightness", "integer", "\"minimum\": 10, \"maximum\": 100",
+      "Brightness of the picture, in percent. The screenshot isn't dimmed" },
 };
 
 
@@ -518,6 +522,13 @@ static char *webApplySetting(struct TConfig *c, char *key, struct TJsonValue *va
         c->currentDay = value->integer;
         // So that it isn't incremented right away
         c->date = storyClockIsSynchronized() ? getDayOfYear() : -1;
+        return NULL;
+    }
+
+    if (!strcmp(key, "brightness")) {
+        if (value->type != JSON_INTEGER || value->integer < BRIGHTNESS_MIN || value->integer > 100)
+            return "brightness must be a number from 10 to 100";
+        c->brightness = value->integer;
         return NULL;
     }
 
