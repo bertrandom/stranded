@@ -257,7 +257,6 @@ static void webRespondStatus(int fd)
         "    \"storyDay\": %d,\n"
         "    \"sound\": %s,\n"
         "    \"hotkeys\": %s,\n"
-        "    \"debug\": %s,\n"
         "    \"nightMode\": %s,\n"
         "    \"nightStart\": \"%02d:%02d\",\n"
         "    \"nightEnd\": \"%02d:%02d\",\n"
@@ -284,7 +283,6 @@ static void webRespondStatus(int fd)
         c.currentDay,
         JSON_BOOL(c.sound),
         JSON_BOOL(c.hotkeys),
-        JSON_BOOL(c.debug),
         JSON_BOOL(c.nightMode),
         c.nightStart / 60, c.nightStart % 60,
         c.nightEnd / 60, c.nightEnd % 60,
@@ -416,7 +414,6 @@ static const struct {
       "Day of the story. It normally advances by one each day; a new value takes effect at the next scene" },
     { "sound",      "boolean", NULL, "Play sounds. Without effect if started with nosound" },
     { "hotkeys",    "boolean", NULL, "Enable hot keys. When off, any key press quits" },
-    { "debug",      "boolean", NULL, "Print debug info. Not saved" },
     { "nightMode",  "boolean", NULL, "Turn the display off during night hours" },
     { "nightStart", "string",  "\"format\": \"HH:MM\"", "Start of the night, local time" },
     { "nightEnd",   "string",  "\"format\": \"HH:MM\"", "End of the night, local time" },
@@ -536,7 +533,6 @@ static char *webApplySetting(struct TConfig *c, char *key, struct TJsonValue *va
 
     if      (!strcmp(key, "sound"))     boolSetting = &c->sound;
     else if (!strcmp(key, "hotkeys"))   boolSetting = &c->hotkeys;
-    else if (!strcmp(key, "debug"))     boolSetting = &c->debug;
     else if (!strcmp(key, "nightMode")) boolSetting = &c->nightMode;
     else if (!strcmp(key, "cec"))       boolSetting = &c->cec;
     else

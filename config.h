@@ -28,7 +28,6 @@ struct TConfig {
     int date;
     int sound;          // play sounds (if audio could be initialized)
     int hotkeys;        // enable hot keys
-    int debug;          // print debug info - not saved
     int nightMode;      // turn the display off during night hours
     int nightStart;     // in minutes after midnight
     int nightEnd;       // in minutes after midnight

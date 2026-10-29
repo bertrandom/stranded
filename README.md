@@ -120,7 +120,6 @@ Settings changed from the web page are saved in `~/.stranded`, next to the story
 | `storyDay`   | 1 to 11 (a number) | Day of the story. It normally advances by one each day; a new value takes effect at the next scene |
 | `sound`      | `true` / `false` | Play sounds. Without effect if started with `nosound` |
 | `hotkeys`    | `true` / `false` | Enable hot keys. When off, any key press quits |
-| `debug`      | `true` / `false` | Print debug info. Not saved |
 | `nightMode`  | `true` / `false` | Turn the display off during night hours |
 | `nightStart` | `"HH:MM"` (a string) | Start of the night, local time |
 | `nightEnd`   | `"HH:MM"` (a string) | End of the night, local time |

@@ -146,7 +146,6 @@ void cfgInit()
     cfg.date       = -1;    // not known yet
     cfg.sound      = 1;
     cfg.hotkeys    = evHotKeysEnabled;
-    cfg.debug      = debugMode;
     cfg.nightMode  = 0;
     cfg.nightStart = 22 * 60;
     cfg.nightEnd   = 8 * 60;
@@ -201,7 +200,6 @@ void cfgApply()
 {
     cfgLock();
     evHotKeysEnabled = cfg.hotkeys;
-    debugMode        = cfg.debug;
     soundMuted       = !cfg.sound;
     cfgUnlock();
 }
