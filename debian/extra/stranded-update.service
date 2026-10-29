@@ -1,0 +1,9 @@
+[Unit]
+Description=Update stranded to its latest release
+# Started from stranded's web page, which polkit allows (see
+# /usr/share/polkit-1/rules.d/50-stranded.rules)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/stranded/stranded-update install

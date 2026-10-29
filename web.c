@@ -86,6 +86,9 @@ void webInit()
 #define DATA_DIR        "/usr/share/stranded"
 #endif
 
+// Installed by the Debian package, to check for and install updates
+#define UPDATE_HELPER   "/usr/lib/stranded/stranded-update"
+
 #define JSON_BOOL(x)    ((x) ? "true" : "false")
 
 
@@ -124,6 +127,8 @@ static const struct {
     { "POST", "/api/reset-timer", "Reset the \"stranded for\" timer to zero" },
     { "POST", "/api/reboot",      "Reboot the computer, with systemctl reboot. Needs the permission to (see the README). Returns {\"ok\": true}" },
     { "POST", "/api/shutdown",    "Shut the computer down, with systemctl poweroff. Needs the permission to (see the README). Returns {\"ok\": true}" },
+    { "GET",  "/api/update",      "Whether a newer release is available: {\"installed\", \"latest\", \"updateAvailable\", \"updating\"}. Only when installed with the Debian package" },
+    { "POST", "/api/update",      "Download and install the latest release, in the background; stranded restarts once it's installed. Returns {\"ok\": true}" },
 };
 
 
@@ -704,24 +709,96 @@ static void webRespondApi(int fd)
 }
 
 
+// Run a command, and wait for it. Up to outLen - 1 bytes of what it prints
+// go to out (if not NULL). Returns its exit status, or -1 if it couldn't run
+static int webRun(char *const argv[], char *out, size_t outLen)
+{
+    int status, pipeFds[2];
+    size_t len = 0;
+
+    if (pipe(pipeFds) < 0)
+        return -1;
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        dup2(pipeFds[1], STDOUT_FILENO);
+        close(pipeFds[0]);
+        close(pipeFds[1]);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+
+    close(pipeFds[1]);
+
+    // Read everything, so that the command never blocks on a full pipe
+    for (ssize_t n=1; n > 0; ) {
+        char buf[512];
+        n = read(pipeFds[0], buf, sizeof(buf));
+        for (ssize_t i=0; i < n; i++)
+            if (out != NULL && len + 1 < outLen)
+                out[len++] = buf[i];
+    }
+
+    close(pipeFds[0]);
+
+    if (out != NULL && outLen)
+        out[len] = 0;
+
+    if (pid < 0 || waitpid(pid, &status, 0) < 0 || !WIFEXITED(status))
+        return -1;
+
+    return WEXITSTATUS(status);
+}
+
+
 // Reboot or power off the computer, through systemd. stranded usually
 // runs as an unprivileged user: it needs to be allowed to, by a polkit rule
 static void webSystemctl(int fd, char *verb)
 {
-    int status;
-    pid_t pid = fork();
+    char *argv[] = { "systemctl", "--no-ask-password", verb, NULL };
 
-    if (pid == 0) {
-        execlp("systemctl", "systemctl", "--no-ask-password", verb, (char *) NULL);
-        _exit(127);
-    }
-
-    if (pid < 0 || waitpid(pid, &status, 0) < 0
-            || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (webRun(argv, NULL, 0) != 0) {
         char message[128];
         snprintf(message, sizeof(message),
                  "systemctl %s failed: is stranded allowed to? See the README", verb);
         webRespondError(fd, 500, message);
+        return;
+    }
+
+    webRespondJson(fd, 200, "{\"ok\": true}\n");
+}
+
+
+// GET: whether a newer release is available, as reported by the Debian
+// package's update helper. POST: start installing it, as root, through
+// stranded-update.service; stranded restarts once it's installed
+static void webHandleUpdate(int fd, int isPost)
+{
+    char output[RESPONSE_LEN];
+
+    if (access(UPDATE_HELPER, X_OK) != 0) {
+        webRespondError(fd, 404, "updating is only possible when installed with the Debian package");
+        return;
+    }
+
+    if (!isPost) {
+        char *argv[] = { UPDATE_HELPER, "check", NULL };
+
+        if (webRun(argv, output, sizeof(output)) != 0 || output[0] != '{') {
+            webRespondError(fd, 500, "couldn't check for updates: see stranded's log");
+            return;
+        }
+
+        webRespondJson(fd, 200, output);
+        return;
+    }
+
+    char *argv[] = { "systemctl", "--no-ask-password", "--no-block",
+                     "start", "stranded-update.service", NULL };
+
+    if (webRun(argv, NULL, 0) != 0) {
+        webRespondError(fd, 500, "couldn't start stranded-update.service: is stranded allowed to? See the README");
         return;
     }
 
@@ -846,6 +923,12 @@ static void webHandleClient(int fd)
             webRespondStatus(fd);
         else
             webRespondError(fd, 405, "use GET");
+    }
+    else if (!strcmp(path, "/api/update")) {
+        if (isGet || isPost)
+            webHandleUpdate(fd, isPost);
+        else
+            webRespondError(fd, 405, "use GET or POST");
     }
     else if (!strcmp(path, "/api/screenshot")) {
         if (isGet)

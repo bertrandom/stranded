@@ -22,7 +22,8 @@ It installs:
 | A `stranded` system user, whose home holds the data files and the settings | `/var/lib/stranded` |
 | A service that runs `stranded hotkeys web` as that user on `/dev/tty1`, drawing straight to the screen with KMS/DRM | `stranded.service`, enabled |
 | An override that disables the login prompt on tty1 while the service is enabled | `/usr/lib/systemd/system/getty@tty1.service.d/stranded.conf` |
-| A polkit rule letting the `stranded` user reboot and shut down the computer, for the web page | `/usr/share/polkit-1/rules.d/50-stranded.rules` |
+| A polkit rule letting the `stranded` user reboot and shut down the computer, and start `stranded-update.service`, for the web page | `/usr/share/polkit-1/rules.d/50-stranded.rules` |
+| An update helper, and a service running it as root, to install the latest release from the web page | `/usr/lib/stranded/stranded-update`, `stranded-update.service` |
 
 The data files aren't included (see below): copy them to `/var/lib/stranded`, then start the service. It doesn't start until `RESOURCE.MAP` is there.
 
@@ -140,6 +141,8 @@ Settings changed from the web page are saved in `~/.stranded`, next to the story
 | `POST /api/quit` | Terminate (hot key: Esc) |
 | `POST /api/restart` | Same as `quit`: run as a service with `Restart=always`, stranded is started again |
 | `POST /api/reboot`, `POST /api/shutdown` | Reboot or shut down the computer, with `systemctl reboot` or `systemctl poweroff` |
+| `GET /api/update` | Whether a newer release is available, eg. `{"installed": "2026.10.29", "latest": "2026.10.30", "updateAvailable": true, "updating": false}` |
+| `POST /api/update` | Download and install the latest release, in the background. stranded restarts once it's installed |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
 | `POST /api/reset-timer` | Reset the "stranded for" timer to zero |
@@ -158,9 +161,11 @@ Rebooting and shutting down go through systemd, so stranded needs to be allowed 
 
 Otherwise, these requests fail with a 500 error.
 
+Updating only works when stranded was installed with the Debian package. `GET /api/update` runs `/usr/lib/stranded/stranded-update check`, which asks GitHub for the latest release. `POST /api/update` starts `stranded-update.service`, which runs `stranded-update install` as root: it downloads the latest release's package and installs it with apt, which restarts stranded. The package's polkit rule lets the `stranded` user start that service, and only that one. Its output goes to `journalctl -u stranded-update`.
+
 The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown on the page as how long Johnny has been stranded. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
 
-Every request except `quit`, `restart`, `reboot` and `shutdown` (which return `{"ok": true}`) returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
+Every request except `quit`, `restart`, `reboot`, `shutdown` and `POST /api/update` (which return `{"ok": true}`) and `GET /api/update` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
     curl http://raspberrypi.local/api/status
     curl http://raspberrypi.local/api

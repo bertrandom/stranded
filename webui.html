@@ -174,15 +174,23 @@
   </section>
 
   <section>
+    <h2>Update</h2>
+    <div class="row">
+      <label>Version<span class="hint">Git revision stranded was built from</span></label>
+      <span class="value" id="revision">–</span>
+    </div>
+    <div class="buttons" style="margin-top: 12px">
+      <button id="checkUpdate">Check for updates</button>
+    </div>
+    <p class="night-state" id="updateState" hidden></p>
+  </section>
+
+  <section>
     <h2>System</h2>
     <div class="buttons">
       <button data-action="restart" data-confirm="Restart Johnny? The screen goes black for a few seconds." data-done="Restarting…">Restart Johnny</button>
       <button data-action="reboot" data-confirm="Reboot the Raspberry Pi? This page stops responding for a minute or so." data-done="Rebooting…">Reboot</button>
       <button class="danger" data-action="shutdown" data-confirm="Shut down the Raspberry Pi? It stays off until it's unplugged and plugged back in." data-done="Shutting down…">Shut down</button>
-    </div>
-    <div class="row" style="margin-top: 12px">
-      <label>Version<span class="hint">Git revision stranded was built from</span></label>
-      <span class="value" id="revision">–</span>
     </div>
   </section>
 </main>
@@ -295,6 +303,7 @@
 
     renderNowPlaying(s);
     $('revision').textContent = s.revision;
+    checkUpdateDone(s);
 
     const d = s.display;
     $('resolution').textContent =
@@ -368,6 +377,55 @@
         refresh();
       }
     });
+  }
+
+  // Checking for updates, and installing one. The installed version shows
+  // in the status's revision (eg. v2026.10.29) once stranded has restarted
+  let updatingTo = null;
+
+  function updateState(text) {
+    const el = $('updateState');
+    el.hidden = !text;
+    el.textContent = text || '';
+  }
+
+  $('checkUpdate').addEventListener('click', async () => {
+    const button = $('checkUpdate');
+    button.disabled = true;
+    updateState('Checking for updates…');
+
+    try {
+      const update = await call('/api/update', { signal: AbortSignal.timeout(30000) });
+
+      if (update.updating) {
+        updateState('An update is already being installed.');
+      }
+      else if (!update.updateAvailable) {
+        updateState(`Up to date: version ${update.installed} is the latest.`);
+      }
+      else if (!confirm(`Update stranded from version ${update.installed} to ${update.latest}? Johnny restarts once it's installed.`)) {
+        updateState(`Version ${update.latest} is available.`);
+      }
+      else {
+        await call('/api/update', { method: 'POST' });
+        updatingTo = update.latest;
+        updateState(`Updating to version ${update.latest}. Johnny restarts once it's installed, in a minute or two…`);
+        return;   // the button stays disabled until it's done
+      }
+    } catch (e) {
+      updateState(`Couldn't check for updates: ${e.message}`);
+    }
+
+    button.disabled = false;
+  });
+
+  // Called with each status: an update is done when the new version runs
+  function checkUpdateDone(s) {
+    if (updatingTo && s.revision === 'v' + updatingTo) {
+      updateState(`Updated to version ${updatingTo}.`);
+      updatingTo = null;
+      $('checkUpdate').disabled = false;
+    }
   }
 
   refresh();
