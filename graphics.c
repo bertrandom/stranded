@@ -195,10 +195,31 @@ void graphicsInit()
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
 
-    sdl_renderer = SDL_CreateRenderer(sdl_window, -1, 0);
+    // Through KMS/DRM, only OpenGL ES works. SDL tries its OpenGL renderer
+    // first, which Mesa may accept, and which then draws nothing
+    sdl_renderer = NULL;
+
+    if (!SDL_strcasecmp(SDL_GetCurrentVideoDriver(), "kmsdrm")) {
+        for (int i=0; i < SDL_GetNumRenderDrivers(); i++) {
+            SDL_RendererInfo info;
+            if (SDL_GetRenderDriverInfo(i, &info) == 0 && !strcmp(info.name, "opengles2")) {
+                sdl_renderer = SDL_CreateRenderer(sdl_window, i, 0);
+                if (sdl_renderer == NULL)
+                    fprintf(stderr, "Could not create an OpenGL ES renderer: %s\n", SDL_GetError());
+            }
+        }
+    }
+
+    if (sdl_renderer == NULL)
+        sdl_renderer = SDL_CreateRenderer(sdl_window, -1, 0);
 
     if (sdl_renderer == NULL)
         fatalError("Could not create renderer: %s", SDL_GetError());
+
+    SDL_RendererInfo rendererInfo;
+    SDL_GetRendererInfo(sdl_renderer, &rendererInfo);
+    fprintf(stderr, "Drawing at %dx%d with SDL's %s renderer (%s video driver)\n",
+           grWidth, SCREEN_HEIGHT, rendererInfo.name, SDL_GetCurrentVideoDriver());
 
     SDL_RenderSetLogicalSize(sdl_renderer, grWidth, SCREEN_HEIGHT);
 
