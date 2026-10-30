@@ -427,13 +427,13 @@
       else if (!update.updateAvailable) {
         updateState(`Up to date: version ${update.installed} is the latest.`);
       }
-      else if (!confirm(`Update stranded from version ${update.installed} to ${update.latest}? Johnny restarts once it's installed.`)) {
+      else if (!confirm(`Update stranded from version ${update.installed} to ${update.latest}? stranded restarts once it's installed.`)) {
         updateState(`Version ${update.latest} is available.`);
       }
       else {
         await call('/api/update', { method: 'POST' });
         updatingTo = update.latest;
-        updateState(`Updating to version ${update.latest}. Johnny restarts once it's installed, in a minute or two…`);
+        updateState(`Updating to version ${update.latest}. stranded restarts once it's installed, in a minute or two…`);
         return;   // the button stays disabled until it's done
       }
     } catch (e) {
