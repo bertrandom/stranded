@@ -71,11 +71,13 @@ void webInit()
 #include <signal.h>
 #include <strings.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define REQUEST_LEN     8192
 #define RESPONSE_LEN    4096
@@ -129,6 +131,9 @@ static const struct {
     { "POST", "/api/shutdown",    "Shut the computer down, with systemctl poweroff. Needs the permission to (see the README). Returns {\"ok\": true}" },
     { "GET",  "/api/update",      "Whether a newer release is available: {\"installed\", \"latest\", \"updateAvailable\", \"updating\"}. Only when installed with the Debian package" },
     { "POST", "/api/update",      "Download and install the latest release, in the background; stranded restarts once it's installed. Returns {\"ok\": true}" },
+    { "GET",  "/api/network",     "The Wi-Fi and Ethernet connections, from NetworkManager: {\"hostname\", \"via\" (whether this request came over \"wifi\" or \"ethernet\"), \"wifi\", \"ethernet\", \"wifiSwitch\" (the last switch to another Wi-Fi network)}" },
+    { "GET",  "/api/wifi/networks", "Scan for Wi-Fi networks, which takes a few seconds: {\"networks\": [{\"ssid\", \"signal\", \"security\", \"inUse\"}]}, strongest first" },
+    { "POST", "/api/wifi/connect", "Switch to another Wi-Fi network, in the background; if it can't, back to the previous one. Body: {\"ssid\": \"...\", \"password\": \"...\"}. Follow it with GET /api/network. Needs NetworkManager's permission (see the README). Returns {\"ok\": true}" },
 };
 
 
@@ -716,27 +721,59 @@ static void webRespondApi(int fd)
 }
 
 
-// Run a command, and wait for it. Up to outLen - 1 bytes of what it prints
-// go to out (if not NULL). Returns its exit status, or -1 if it couldn't run
-static int webRun(char *const argv[], char *out, size_t outLen)
+// A pipe whose ends aren't inherited by commands run from another thread
+// meanwhile, which would keep it open
+static int webPipe(int fds[2])
 {
-    int status, pipeFds[2];
+    if (pipe(fds) < 0)
+        return -1;
+
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    return 0;
+}
+
+
+// Run a command, and wait for it. input (if not NULL) is written to its
+// standard input. Up to outLen - 1 bytes of what it prints, including its
+// errors if withErrors, go to out (if not NULL). Returns its exit status, or
+// -1 if it couldn't run
+static int webRunInput(char *const argv[], const char *input, int withErrors,
+                       char *out, size_t outLen)
+{
+    int status, pipeFds[2], inputFds[2];
     size_t len = 0;
 
-    if (pipe(pipeFds) < 0)
+    if (webPipe(pipeFds) < 0)
         return -1;
+
+    if (input != NULL && webPipe(inputFds) < 0) {
+        close(pipeFds[0]);
+        close(pipeFds[1]);
+        return -1;
+    }
 
     pid_t pid = fork();
 
     if (pid == 0) {
         dup2(pipeFds[1], STDOUT_FILENO);
-        close(pipeFds[0]);
-        close(pipeFds[1]);
+        if (withErrors)
+            dup2(pipeFds[1], STDERR_FILENO);
+        if (input != NULL)
+            dup2(inputFds[0], STDIN_FILENO);
         execvp(argv[0], argv);
         _exit(127);
     }
 
     close(pipeFds[1]);
+
+    // Small enough to fit in the pipe: it doesn't block
+    if (input != NULL) {
+        close(inputFds[0]);
+        if (pid > 0)
+            webSend(inputFds[1], input, strlen(input));
+        close(inputFds[1]);
+    }
 
     // Read everything, so that the command never blocks on a full pipe
     for (ssize_t n=1; n > 0; ) {
@@ -756,6 +793,12 @@ static int webRun(char *const argv[], char *out, size_t outLen)
         return -1;
 
     return WEXITSTATUS(status);
+}
+
+
+static int webRun(char *const argv[], char *out, size_t outLen)
+{
+    return webRunInput(argv, NULL, 0, out, outLen);
 }
 
 
@@ -806,6 +849,599 @@ static void webHandleUpdate(int fd, int isPost)
 
     if (webRun(argv, NULL, 0) != 0) {
         webRespondError(fd, 500, "couldn't start stranded-update.service: is stranded allowed to? See the README");
+        return;
+    }
+
+    webRespondJson(fd, 200, "{\"ok\": true}\n");
+}
+
+
+// Wi-Fi and Ethernet, through NetworkManager's nmcli. Changing networks
+// needs NetworkManager's permission, which the Debian package's polkit
+// rule gives the stranded user
+
+#define NMCLI_LEN       16384
+#define MAX_NETWORKS    64
+
+struct TNetDevice {
+    char device[32];        // empty if there's none of that type
+    char state[64];         // eg. connected, disconnected, unavailable
+    char ip[64];
+};
+
+// The last switch to another Wi-Fi network, made in its own thread
+enum { WIFI_IDLE, WIFI_SWITCHING, WIFI_CONNECTED, WIFI_FAILED };
+
+static SDL_mutex *webWifiMutex;
+
+static struct {
+    int    state;
+    char   device[32];
+    char   ssid[128];
+    char   password[128];   // only until the thread has it
+    char   error[256];
+    Uint32 finishedAt;      // SDL_GetTicks()
+} webWifiSwitch;
+
+
+// Split a line of nmcli's terse output into its fields, in place: colons
+// in values are escaped as \: and backslashes as \\. Fields past maxFields
+// are dropped. Returns the number of fields
+static int webSplitTerse(char *line, char **fields, int maxFields)
+{
+    char *out = line;
+    int n = 0;
+
+    fields[n++] = out;
+
+    for (char *in = line; *in; in++) {
+        if (*in == '\\' && in[1]) {
+            *out++ = *++in;
+        }
+        else if (*in == ':') {
+            *out++ = 0;
+            if (n < maxFields)
+                fields[n++] = out;
+        }
+        else {
+            *out++ = *in;
+        }
+    }
+
+    *out = 0;
+
+    return n;
+}
+
+
+// Its first IPv4 address, without the prefix length (eg. 192.168.1.20)
+static void webGetIp(struct TNetDevice *dev)
+{
+    char output[sizeof(dev->ip)];
+    char *argv[] = { "nmcli", "-g", "IP4.ADDRESS", "device", "show", dev->device, NULL };
+
+    dev->ip[0] = 0;
+
+    if (webRun(argv, output, sizeof(output)) == 0) {
+        output[strcspn(output, "/ |\n")] = 0;
+        snprintf(dev->ip, sizeof(dev->ip), "%s", output);
+    }
+}
+
+
+// The Wi-Fi and Ethernet devices: the first connected one of each type, or
+// else the first one. Returns 0 if nmcli couldn't be run
+static int webGetDevices(struct TNetDevice *wifi, struct TNetDevice *ethernet)
+{
+    char *output = safe_malloc(NMCLI_LEN);
+    char *argv[] = { "nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status", NULL };
+    char *line, *next;
+
+    memset(wifi, 0, sizeof(*wifi));
+    memset(ethernet, 0, sizeof(*ethernet));
+
+    if (webRun(argv, output, NMCLI_LEN) != 0) {
+        free(output);
+        return 0;
+    }
+
+    for (line = strtok_r(output, "\n", &next); line; line = strtok_r(NULL, "\n", &next)) {
+
+        char *fields[3];
+        struct TNetDevice *dev;
+
+        if (webSplitTerse(line, fields, 3) < 3)
+            continue;
+
+        if (!strcmp(fields[1], "wifi"))
+            dev = wifi;
+        else if (!strcmp(fields[1], "ethernet"))
+            dev = ethernet;
+        else
+            continue;
+
+        if (dev->device[0] && !strncmp(dev->state, "connected", 9))
+            continue;
+
+        snprintf(dev->device, sizeof(dev->device), "%s", fields[0]);
+        snprintf(dev->state, sizeof(dev->state), "%s", fields[2]);
+    }
+
+    free(output);
+
+    if (wifi->device[0])
+        webGetIp(wifi);
+    if (ethernet->device[0])
+        webGetIp(ethernet);
+
+    return 1;
+}
+
+
+// The Wi-Fi network the device is on, from NetworkManager's last scan
+static void webGetCurrentWifi(const char *device, char *ssid, size_t ssidLen, int *signal)
+{
+    char *output = safe_malloc(NMCLI_LEN);
+    char *argv[] = { "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL", "device", "wifi", "list",
+                     "ifname", (char *) device, "--rescan", "no", NULL };
+    char *line, *next;
+
+    ssid[0] = 0;
+    *signal = 0;
+
+    if (webRun(argv, output, NMCLI_LEN) == 0) {
+        for (line = strtok_r(output, "\n", &next); line; line = strtok_r(NULL, "\n", &next)) {
+            char *fields[3];
+            if (webSplitTerse(line, fields, 3) == 3 && fields[0][0] == '*') {
+                snprintf(ssid, ssidLen, "%s", fields[1]);
+                *signal = atoi(fields[2]);
+                break;
+            }
+        }
+    }
+
+    free(output);
+}
+
+
+// The address this request came to, to tell whether it came over Wi-Fi or
+// Ethernet
+static void webGetLocalIp(int fd, char *ip, size_t ipLen)
+{
+    struct sockaddr_in addr;
+    socklen_t addrLen = sizeof(addr);
+
+    ip[0] = 0;
+
+    if (getsockname(fd, (struct sockaddr *) &addr, &addrLen) == 0 && addr.sin_family == AF_INET)
+        inet_ntop(AF_INET, &addr.sin_addr, ip, ipLen);
+}
+
+
+static void webRespondNetwork(int fd)
+{
+    struct TNetDevice wifi, ethernet;
+    char *body = safe_malloc(RESPONSE_LEN);
+    char hostname[256], localIp[64], ssid[128], escaped[128 * 6 + 1];
+    char *via = "null";
+    int signal;
+    size_t len = 0, max = RESPONSE_LEN;
+
+    if (!webGetDevices(&wifi, &ethernet)) {
+        webRespondError(fd, 500, "couldn't run nmcli: is NetworkManager installed?");
+        free(body);
+        return;
+    }
+
+    webGetLocalIp(fd, localIp, sizeof(localIp));
+
+    if (localIp[0] && !strcmp(localIp, wifi.ip))
+        via = "\"wifi\"";
+    else if (localIp[0] && !strcmp(localIp, ethernet.ip))
+        via = "\"ethernet\"";
+
+    if (gethostname(hostname, sizeof(hostname)) != 0)
+        hostname[0] = 0;
+    hostname[sizeof(hostname) - 1] = 0;
+    webJsonEscape(escaped, sizeof(escaped), hostname);
+
+    len = webAppend(body, len, max, "{\n  \"hostname\": \"%s\",\n  \"via\": %s,\n", escaped, via);
+
+    if (wifi.device[0]) {
+        webGetCurrentWifi(wifi.device, ssid, sizeof(ssid), &signal);
+        webJsonEscape(escaped, sizeof(escaped), ssid);
+        len = webAppend(body, len, max,
+            "  \"wifi\": { \"device\": \"%s\", \"state\": \"%s\", \"ssid\": \"%s\", \"signal\": %d, \"ip\": \"%s\" },\n",
+            wifi.device, wifi.state, escaped, signal, wifi.ip);
+    }
+    else {
+        len = webAppend(body, len, max, "  \"wifi\": null,\n");
+    }
+
+    if (ethernet.device[0])
+        len = webAppend(body, len, max,
+            "  \"ethernet\": { \"device\": \"%s\", \"state\": \"%s\", \"ip\": \"%s\" },\n",
+            ethernet.device, ethernet.state, ethernet.ip);
+    else
+        len = webAppend(body, len, max, "  \"ethernet\": null,\n");
+
+    SDL_LockMutex(webWifiMutex);
+
+    if (webWifiSwitch.state == WIFI_IDLE) {
+        len = webAppend(body, len, max, "  \"wifiSwitch\": null\n}\n");
+    }
+    else {
+        static char *states[] = { "", "switching", "connected", "failed" };
+        char error[sizeof(webWifiSwitch.error) * 6 + 1];
+        int secondsAgo = webWifiSwitch.state == WIFI_SWITCHING ? 0
+                       : (SDL_GetTicks() - webWifiSwitch.finishedAt) / 1000;
+
+        webJsonEscape(escaped, sizeof(escaped), webWifiSwitch.ssid);
+        webJsonEscape(error, sizeof(error), webWifiSwitch.error);
+        len = webAppend(body, len, max,
+            "  \"wifiSwitch\": { \"ssid\": \"%s\", \"state\": \"%s\", \"error\": \"%s\", \"secondsAgo\": %d }\n}\n",
+            escaped, states[webWifiSwitch.state], error, secondsAgo);
+    }
+
+    SDL_UnlockMutex(webWifiMutex);
+
+    if (len >= max)
+        webRespondError(fd, 500, "response too large");
+    else
+        webRespondJson(fd, 200, body);
+
+    free(body);
+}
+
+
+struct TWifiNetwork {
+    char ssid[128];
+    char security[64];
+    int  signal;
+    int  inUse;
+};
+
+
+// The one in use first, then the strongest
+static int webCompareNetworks(const void *a, const void *b)
+{
+    const struct TWifiNetwork *na = a, *nb = b;
+
+    if (na->inUse != nb->inUse)
+        return nb->inUse - na->inUse;
+
+    return nb->signal - na->signal;
+}
+
+
+// Scan for Wi-Fi networks, each listed once (it can have several access
+// points), hidden ones left out
+static void webRespondWifiNetworks(int fd)
+{
+    struct TNetDevice wifi, ethernet;
+    struct TWifiNetwork *networks;
+    char *output, *body, *line, *next;
+    char escaped[128 * 6 + 1];
+    int numNetworks = 0;
+    size_t len = 0, max = 32768;
+
+    if (!webGetDevices(&wifi, &ethernet)) {
+        webRespondError(fd, 500, "couldn't run nmcli: is NetworkManager installed?");
+        return;
+    }
+
+    if (!wifi.device[0]) {
+        webRespondError(fd, 404, "no Wi-Fi device");
+        return;
+    }
+
+    char *argv[] = { "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list",
+                     "ifname", wifi.device, "--rescan", "yes", NULL };
+
+    output = safe_malloc(NMCLI_LEN);
+
+    // Scanning takes a few seconds. If it isn't allowed, the last scan will do
+    if (webRun(argv, output, NMCLI_LEN) != 0) {
+        argv[10] = "no";
+        if (webRun(argv, output, NMCLI_LEN) != 0) {
+            webRespondError(fd, 500, "couldn't scan for Wi-Fi networks: see stranded's log");
+            free(output);
+            return;
+        }
+    }
+
+    networks = safe_malloc(MAX_NETWORKS * sizeof(*networks));
+
+    for (line = strtok_r(output, "\n", &next); line; line = strtok_r(NULL, "\n", &next)) {
+
+        char *fields[4];
+        int i;
+
+        if (webSplitTerse(line, fields, 4) < 4 || !fields[1][0])
+            continue;
+
+        for (i=0; i < numNetworks && strcmp(networks[i].ssid, fields[1]); i++)
+            ;
+
+        if (i == numNetworks) {
+            if (numNetworks == MAX_NETWORKS)
+                continue;
+            numNetworks++;
+            snprintf(networks[i].ssid, sizeof(networks[i].ssid), "%s", fields[1]);
+            networks[i].signal = -1;
+            networks[i].inUse  = 0;
+        }
+
+        if (atoi(fields[2]) > networks[i].signal) {
+            networks[i].signal = atoi(fields[2]);
+            snprintf(networks[i].security, sizeof(networks[i].security), "%s",
+                     strcmp(fields[3], "--") ? fields[3] : "");
+        }
+
+        networks[i].inUse |= (fields[0][0] == '*');
+    }
+
+    free(output);
+
+    qsort(networks, numNetworks, sizeof(*networks), webCompareNetworks);
+
+    body = safe_malloc(max);
+    len = webAppend(body, len, max, "{\n  \"networks\": [\n");
+
+    for (int i=0; i < numNetworks; i++) {
+        webJsonEscape(escaped, sizeof(escaped), networks[i].ssid);
+        len = webAppend(body, len, max,
+            "    { \"ssid\": \"%s\", \"signal\": %d, \"security\": \"%s\", \"inUse\": %s }%s\n",
+            escaped, networks[i].signal, networks[i].security,
+            JSON_BOOL(networks[i].inUse), i < numNetworks - 1 ? "," : "");
+    }
+
+    len = webAppend(body, len, max, "  ]\n}\n");
+
+    if (len >= max)
+        webRespondError(fd, 500, "response too large");
+    else
+        webRespondJson(fd, 200, body);
+
+    free(networks);
+    free(body);
+}
+
+
+// The UUIDs of the connections NetworkManager has, one per line, or of
+// the ones active on a device
+static void webGetConnections(const char *activeOn, char *out, size_t outLen)
+{
+    char *all[]    = { "nmcli", "-t", "-f", "UUID", "connection", "show", NULL };
+    char *active[] = { "nmcli", "-t", "-f", "UUID,DEVICE", "connection", "show", "--active", NULL };
+    char *line, *next;
+    size_t len = 0;
+
+    if (activeOn == NULL) {
+        if (webRun(all, out, outLen) != 0)
+            out[0] = 0;
+        return;
+    }
+
+    char *output = safe_malloc(NMCLI_LEN);
+
+    out[0] = 0;
+
+    if (webRun(active, output, NMCLI_LEN) == 0)
+        for (line = strtok_r(output, "\n", &next); line; line = strtok_r(NULL, "\n", &next)) {
+            char *fields[2];
+            if (webSplitTerse(line, fields, 2) == 2 && !strcmp(fields[1], activeOn))
+                len = webAppend(out, len, outLen, "%s\n", fields[0]);
+        }
+
+    free(output);
+}
+
+
+// Switches to another Wi-Fi network. nmcli asks NetworkManager to, and is
+// given the password on its standard input when it's asked for it (so
+// it's in no command line). If it can't, the new connection is removed
+// and the previous one brought back up
+static int webWifiThread(void *data)
+{
+    char device[32], ssid[128], input[130];
+    char before[NMCLI_LEN], previous[256], after[NMCLI_LEN];
+    char *output = safe_malloc(NMCLI_LEN);
+    char *line, *next, *error;
+    int status;
+
+    SDL_LockMutex(webWifiMutex);
+    snprintf(device, sizeof(device), "%s", webWifiSwitch.device);
+    snprintf(ssid, sizeof(ssid), "%s", webWifiSwitch.ssid);
+    snprintf(input, sizeof(input), "%s\n", webWifiSwitch.password);
+    memset(webWifiSwitch.password, 0, sizeof(webWifiSwitch.password));
+    SDL_UnlockMutex(webWifiMutex);
+
+    webGetConnections(NULL, before, sizeof(before));
+    webGetConnections(device, previous, sizeof(previous));
+    previous[strcspn(previous, "\n")] = 0;
+
+    fprintf(stderr, "Switching %s to the Wi-Fi network %s\n", device, ssid);
+
+    // Given the password once: if it's wrong, it's asked for again, gets
+    // nothing and gives up
+    char *argv[] = { "nmcli", "--ask", "--wait", "45", "device", "wifi", "connect",
+                     ssid, "ifname", device, NULL };
+
+    status = webRunInput(argv, input, 1, output, NMCLI_LEN);
+    memset(input, 0, sizeof(input));
+
+    SDL_LockMutex(webWifiMutex);
+
+    if (status == 0) {
+        webWifiSwitch.state = WIFI_CONNECTED;
+        webWifiSwitch.finishedAt = SDL_GetTicks();
+        SDL_UnlockMutex(webWifiMutex);
+        fprintf(stderr, "Switched to the Wi-Fi network %s\n", ssid);
+        free(output);
+        return 0;
+    }
+
+    // Only nmcli's error message is kept: not the rest of what it printed
+    error = strstr(output, "Error: ");
+    if (error != NULL) {
+        error += 7;
+        error[strcspn(error, "\n")] = 0;
+    }
+    snprintf(webWifiSwitch.error, sizeof(webWifiSwitch.error), "%s",
+             error != NULL ? error : "nmcli failed");
+
+    SDL_UnlockMutex(webWifiMutex);
+    memset(output, 0, NMCLI_LEN);
+
+    fprintf(stderr, "Couldn't switch to the Wi-Fi network %s: %s\n", ssid, webWifiSwitch.error);
+
+    // Remove the connection nmcli made for it, if any
+    webGetConnections(NULL, after, sizeof(after));
+
+    for (line = strtok_r(after, "\n", &next); line; line = strtok_r(NULL, "\n", &next)) {
+
+        char *s = strstr(before, line);
+
+        if (s == NULL || (s != before && s[-1] != '\n') || s[strlen(line)] != '\n') {
+            char *remove[] = { "nmcli", "connection", "delete", line, NULL };
+            webRun(remove, NULL, 0);
+        }
+    }
+
+    // NetworkManager may have gone back to it already
+    if (previous[0]) {
+        webGetConnections(device, after, sizeof(after));
+        if (strstr(after, previous) == NULL) {
+            char *up[] = { "nmcli", "--wait", "30", "connection", "up", previous, NULL };
+            webRun(up, NULL, 0);
+        }
+    }
+
+    SDL_LockMutex(webWifiMutex);
+    webWifiSwitch.state = WIFI_FAILED;
+    webWifiSwitch.finishedAt = SDL_GetTicks();
+    SDL_UnlockMutex(webWifiMutex);
+
+    free(output);
+    return 0;
+}
+
+
+// Body: {"ssid": "...", "password": "..."}. The password is left out for
+// an open network
+static void webHandleWifiConnect(int fd, char *body)
+{
+    struct TNetDevice wifi, ethernet;
+    char ssid[128] = "", password[128] = "";
+    char *error = NULL;
+    char *p = body;
+
+    webSkipJsonSpaces(&p);
+
+    if (*p++ != '{')
+        error = "expected a JSON object";
+
+    while (error == NULL) {
+
+        char key[32], *value;
+        size_t valueLen;
+
+        webSkipJsonSpaces(&p);
+
+        if (*p == '}')
+            break;
+
+        if (!webParseJsonString(&p, key, sizeof(key))) {
+            error = "malformed JSON: expected ssid or password";
+            break;
+        }
+
+        if (!strcmp(key, "ssid")) {
+            value = ssid;
+            valueLen = sizeof(ssid);
+        }
+        else if (!strcmp(key, "password")) {
+            value = password;
+            valueLen = sizeof(password);
+        }
+        else {
+            error = "only ssid and password are expected";
+            break;
+        }
+
+        webSkipJsonSpaces(&p);
+
+        if (*p++ != ':') {
+            error = "malformed JSON: expected a colon";
+            break;
+        }
+
+        webSkipJsonSpaces(&p);
+
+        if (!webParseJsonString(&p, value, valueLen)) {
+            error = "ssid and password must be strings, of at most 64 characters";
+            break;
+        }
+
+        webSkipJsonSpaces(&p);
+
+        if (*p == ',')
+            p++;
+        else if (*p++ == '}')
+            break;
+        else
+            error = "malformed JSON: expected a comma or a closing brace";
+    }
+
+    if (error == NULL && (strlen(ssid) < 1 || strlen(ssid) > 32))
+        error = "ssid must be from 1 to 32 characters";
+
+    if (error == NULL && strlen(password) > 64)
+        error = "password must be at most 64 characters";
+
+    for (char *c = password; error == NULL && *c; c++)
+        if ((unsigned char) *c < 0x20)
+            error = "password mustn't have control characters";
+
+    if (error == NULL && !webGetDevices(&wifi, &ethernet))
+        error = "couldn't run nmcli: is NetworkManager installed?";
+
+    if (error == NULL && !wifi.device[0])
+        error = "no Wi-Fi device";
+
+    SDL_LockMutex(webWifiMutex);
+
+    if (error == NULL && webWifiSwitch.state == WIFI_SWITCHING)
+        error = "already switching networks";
+
+    if (error == NULL) {
+        webWifiSwitch.state = WIFI_SWITCHING;
+        webWifiSwitch.error[0] = 0;
+        snprintf(webWifiSwitch.device, sizeof(webWifiSwitch.device), "%s", wifi.device);
+        snprintf(webWifiSwitch.ssid, sizeof(webWifiSwitch.ssid), "%s", ssid);
+        snprintf(webWifiSwitch.password, sizeof(webWifiSwitch.password), "%s", password);
+
+        SDL_Thread *thread = SDL_CreateThread(webWifiThread, "wifi", NULL);
+
+        if (thread != NULL) {
+            SDL_DetachThread(thread);
+        }
+        else {
+            webWifiSwitch.state = WIFI_IDLE;
+            memset(webWifiSwitch.password, 0, sizeof(webWifiSwitch.password));
+            error = "couldn't start switching networks";
+        }
+    }
+
+    SDL_UnlockMutex(webWifiMutex);
+
+    // The request's copy of it
+    memset(password, 0, sizeof(password));
+    memset(body, 0, strlen(body));
+
+    if (error != NULL) {
+        webRespondError(fd, 400, error);
         return;
     }
 
@@ -937,6 +1573,24 @@ static void webHandleClient(int fd)
         else
             webRespondError(fd, 405, "use GET or POST");
     }
+    else if (!strcmp(path, "/api/network")) {
+        if (isGet)
+            webRespondNetwork(fd);
+        else
+            webRespondError(fd, 405, "use GET");
+    }
+    else if (!strcmp(path, "/api/wifi/networks")) {
+        if (isGet)
+            webRespondWifiNetworks(fd);
+        else
+            webRespondError(fd, 405, "use GET");
+    }
+    else if (!strcmp(path, "/api/wifi/connect")) {
+        if (isPost)
+            webHandleWifiConnect(fd, body);
+        else
+            webRespondError(fd, 405, "use POST");
+    }
     else if (!strcmp(path, "/api/screenshot")) {
         if (isGet)
             webRespondScreenshot(fd);
@@ -994,6 +1648,8 @@ void webInit()
         return;
 
     signal(SIGPIPE, SIG_IGN);   // a client closing early mustn't kill us
+
+    webWifiMutex = SDL_CreateMutex();
 
     if ((server = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         fprintf(stderr, "Web server: socket() failed: %s\n", strerror(errno));

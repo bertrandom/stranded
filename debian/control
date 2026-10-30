@@ -14,7 +14,8 @@ Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, libegl1, libegl-mesa0, libgles2,
 # For updating from the web page
  curl
-Recommends: polkitd, v4l-utils
+# nmcli, for the web page's Wi-Fi and Ethernet section
+Recommends: polkitd, v4l-utils, network-manager
 Description: Johnny Castaway screensaver, as a full screen service
  Stranded plays the 1992 Johnny Castaway screensaver full screen, straight
  through KMS/DRM, as a systemd service. It has a web page and an API to

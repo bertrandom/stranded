@@ -32,6 +32,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     background: var(--bg);
@@ -63,13 +64,16 @@
   .row label { flex: 1; }
   .hint { display: block; color: var(--muted); font-size: .85rem; }
   input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
-  input[type=time], select {
+  input[type=time], input[type=password], select {
     font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   }
   input[type=range] { width: 160px; accent-color: var(--accent); }
   .slider { display: flex; align-items: center; gap: 8px; }
   .slider output { min-width: 3.2em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=password] { width: 200px; }
+  #wifiNetworks { max-width: 260px; }
+  .picker { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .times { display: flex; gap: 8px; align-items: center; }
   .timer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .elapsed { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
@@ -177,6 +181,36 @@
       <label>Resolution<span class="hint">The picture is scaled up to fill the display</span></label>
       <span class="value" id="resolution">–</span>
     </div>
+  </section>
+
+  <section id="network" hidden>
+    <h2>Network</h2>
+    <div class="row" id="wifiRow">
+      <label>Wi-Fi<span class="hint" id="wifiHint"></span></label>
+      <span class="value" id="wifi">–</span>
+    </div>
+    <div class="row" id="ethernetRow" hidden>
+      <label>Ethernet<span class="hint" id="ethernetHint"></span></label>
+      <span class="value" id="ethernet">–</span>
+    </div>
+    <div class="buttons" style="margin-top: 12px">
+      <button id="scanWifi">Change Wi-Fi network</button>
+    </div>
+    <div class="picker" id="wifiPicker" hidden>
+      <div class="row">
+        <label for="wifiNetworks">Network</label>
+        <select id="wifiNetworks"></select>
+      </div>
+      <div class="row" id="wifiPasswordRow">
+        <label for="wifiPassword">Password<span class="hint">Can be left empty for a network stranded already knows</span></label>
+        <input type="password" id="wifiPassword" autocomplete="off">
+      </div>
+      <div class="buttons" style="margin-top: 12px">
+        <button class="primary" id="connectWifi">Connect</button>
+        <button id="cancelWifi">Cancel</button>
+      </div>
+    </div>
+    <p class="night-state" id="wifiState" hidden></p>
   </section>
 
   <section>
@@ -452,7 +486,165 @@
     }
   }
 
+  // Network: Wi-Fi and Ethernet, and switching to another Wi-Fi network.
+  // The Pi switches in the background: when this page reaches it over
+  // Wi-Fi, the page stops responding while the Pi is on the new network.
+  // The section stays hidden without NetworkManager
+  let network = null;
+  let wifiNetworks = [];
+  let switchingTo = null;     // when switched from this page
+  let networkTimer;
+
+  function wifiState(text) {
+    const el = $('wifiState');
+    el.hidden = !text;
+    el.textContent = text || '';
+  }
+
+  function deviceState(state, unavailable) {
+    if (state.startsWith('connecting')) return 'Connecting…';
+    if (state === 'unavailable') return unavailable;
+    return 'Not connected';
+  }
+
+  function hint(...parts) {
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function renderNetwork(n) {
+    network = n;
+    $('network').hidden = false;
+
+    const wifi = n.wifi;
+    if (!wifi) {
+      $('wifi').textContent = 'No Wi-Fi';
+      $('wifiHint').textContent = '';
+    }
+    else if (wifi.state.startsWith('connected') && wifi.ssid) {
+      $('wifi').textContent = wifi.ssid;
+      $('wifiHint').textContent = hint(`Signal ${wifi.signal}%`, wifi.ip, n.via === 'wifi' && 'this page uses it');
+    }
+    else {
+      $('wifi').textContent = deviceState(wifi.state, 'Off');
+      $('wifiHint').textContent = '';
+    }
+
+    const ethernet = n.ethernet;
+    $('ethernetRow').hidden = !ethernet;
+    if (ethernet) {
+      const connected = ethernet.state.startsWith('connected');
+      $('ethernet').textContent = connected ? 'Connected' : deviceState(ethernet.state, 'Cable unplugged');
+      $('ethernetHint').textContent = connected ? hint(ethernet.ip, n.via === 'ethernet' && 'this page uses it') : '';
+    }
+
+    const sw = n.wifiSwitch;
+    const switching = sw && sw.state === 'switching';
+    $('scanWifi').disabled = !wifi || switching;
+
+    // A switch made from this page, or from anywhere in the last 10 minutes
+    if (sw && (switching || switchingTo === sw.ssid || sw.secondsAgo < 600)) {
+      if (switching && !switchingTo) wifiState(`Joining ${sw.ssid}…`);
+      else if (sw.state === 'connected') wifiState(`Joined ${sw.ssid}.`);
+      else if (sw.state === 'failed') wifiState(`Couldn't join ${sw.ssid}: ${sw.error}`
+        + (wifi && wifi.ssid ? ` Still on ${wifi.ssid}.` : ''));
+      if (!switching) switchingTo = null;
+    }
+  }
+
+  async function refreshNetwork() {
+    clearTimeout(networkTimer);
+    try {
+      renderNetwork(await call('/api/network'));
+    } catch (e) {
+      // Not responding, eg. while the Pi joins another network
+    }
+    const busy = switchingTo || (network && network.wifiSwitch && network.wifiSwitch.state === 'switching');
+    networkTimer = setTimeout(refreshNetwork, busy ? 2000 : 15000);
+  }
+
+  function showWifiPassword() {
+    const chosen = wifiNetworks.find((n) => n.ssid === $('wifiNetworks').value);
+    $('wifiPasswordRow').hidden = !chosen || !chosen.security;
+    $('wifiPassword').value = '';
+  }
+  $('wifiNetworks').addEventListener('change', showWifiPassword);
+
+  function closeWifiPicker() {
+    $('wifiPassword').value = '';
+    $('wifiPicker').hidden = true;
+    $('scanWifi').hidden = false;
+  }
+  $('cancelWifi').addEventListener('click', closeWifiPicker);
+
+  $('scanWifi').addEventListener('click', async () => {
+    const button = $('scanWifi');
+    button.disabled = true;
+    wifiState('Looking for Wi-Fi networks…');
+
+    try {
+      wifiNetworks = (await call('/api/wifi/networks', { signal: AbortSignal.timeout(30000) })).networks;
+      const select = $('wifiNetworks');
+      select.length = 0;
+      for (const n of wifiNetworks)
+        select.add(new Option(`${n.ssid} (${n.signal}%${n.security ? '' : ', open'})${n.inUse ? ', connected' : ''}`, n.ssid));
+
+      if (wifiNetworks.length) {
+        const other = wifiNetworks.find((n) => !n.inUse);
+        if (other) select.value = other.ssid;
+        showWifiPassword();
+        $('wifiPicker').hidden = false;
+        button.hidden = true;
+        wifiState('');
+      }
+      else {
+        wifiState('No Wi-Fi networks found.');
+      }
+    } catch (e) {
+      wifiState(`Couldn't look for Wi-Fi networks: ${e.message}`);
+    }
+
+    button.disabled = false;
+  });
+
+  async function connectWifi() {
+    const ssid = $('wifiNetworks').value;
+    const password = $('wifiPasswordRow').hidden ? '' : $('wifiPassword').value;
+    const current = network.wifi && network.wifi.ssid;
+    const address = `http://${network.hostname.split('.')[0]}.local/`;
+    if (!ssid) return;
+
+    const message = network.via === 'ethernet'
+      ? `Switch stranded's Wi-Fi to ${ssid}? This page keeps working over Ethernet.`
+      : `Switch stranded to ${ssid}?\n\nIf this device isn't on ${ssid}, this page stops responding: `
+        + `open ${address} from a device on ${ssid}.`
+        + (current ? `\n\nIf stranded can't join ${ssid}, it goes back to ${current} within a minute or two.` : '');
+    if (!confirm(message)) return;
+
+    try {
+      await call('/api/wifi/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssid, password }),
+      });
+    } catch (e) {
+      toast(e.message, true);
+      return;
+    }
+
+    closeWifiPicker();
+    switchingTo = ssid;
+    wifiState(network.via === 'ethernet'
+      ? `Joining ${ssid}…`
+      : `Joining ${ssid}… If this device isn't on ${ssid}, this page stops responding: open ${address} from a device on ${ssid}.`
+        + (current ? ` If stranded can't join it, it goes back to ${current} and this page comes back, within a minute or two.` : ''));
+    clearTimeout(networkTimer);
+    networkTimer = setTimeout(refreshNetwork, 2000);
+  }
+  $('connectWifi').addEventListener('click', connectWifi);
+  $('wifiPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') connectWifi(); });
+
   refresh();
+  refreshNetwork();
   setInterval(refresh, 2000);
   $('preview').src = BLANK;
   refreshPreview();

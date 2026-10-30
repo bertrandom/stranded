@@ -1,5 +1,6 @@
-// Lets stranded's web page reboot or shut down the computer, and update
-// stranded (by starting stranded-update.service)
+// Lets stranded's web page reboot or shut down the computer, update
+// stranded (by starting stranded-update.service), and switch to another
+// Wi-Fi network (through NetworkManager)
 polkit.addRule(function(action, subject) {
     if (subject.user != "stranded")
         return polkit.Result.NOT_HANDLED;
@@ -13,6 +14,13 @@ polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         action.lookup("unit") == "stranded-update.service" &&
         action.lookup("verb") == "start")
+        return polkit.Result.YES;
+
+    // Scanning, connecting, and adding or removing the new network's
+    // connection. NetworkManager's actions don't say which connection
+    if (action.id == "org.freedesktop.NetworkManager.wifi.scan" ||
+        action.id == "org.freedesktop.NetworkManager.network-control" ||
+        action.id == "org.freedesktop.NetworkManager.settings.modify.system")
         return polkit.Result.YES;
 
     return polkit.Result.NOT_HANDLED;

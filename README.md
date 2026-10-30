@@ -22,7 +22,7 @@ It installs:
 | A `stranded` system user, whose home holds the data files and the settings | `/var/lib/stranded` |
 | A service that runs `stranded hotkeys web` as that user on `/dev/tty1`, drawing straight to the screen with KMS/DRM | `stranded.service`, enabled |
 | An override that disables the login prompt on tty1 while the service is enabled | `/usr/lib/systemd/system/getty@tty1.service.d/stranded.conf` |
-| A polkit rule letting the `stranded` user reboot and shut down the computer, and start `stranded-update.service`, for the web page | `/usr/share/polkit-1/rules.d/50-stranded.rules` |
+| A polkit rule letting the `stranded` user reboot and shut down the computer, start `stranded-update.service`, and switch Wi-Fi networks through NetworkManager, for the web page | `/usr/share/polkit-1/rules.d/50-stranded.rules` |
 | An update helper, and a service running it as root, to install the latest release from the web page | `/usr/lib/stranded/stranded-update`, `stranded-update.service` |
 
 The data files aren't included (see below): copy them to `/var/lib/stranded`, then start the service. It doesn't start until `RESOURCE.MAP` is there.
@@ -97,9 +97,9 @@ Run with the `web` option to start a small web server on port 80 (or `port <n>` 
 
     stranded hotkeys web
 
-Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. It serves `webui.html` from the current directory or, if it isn't there, from `/usr/share/stranded`. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
+Open `http://<host>/` for a settings page. It shows a live preview of the screen and which scene is playing, and lets you control playback, night mode and the settings. With NetworkManager, it also shows the Wi-Fi and Ethernet connections, and lets you switch to another Wi-Fi network. It serves `webui.html` from the current directory or, if it isn't there, from `/usr/share/stranded`. Listening on port 80 needs root, or the `CAP_NET_BIND_SERVICE` capability (for a systemd service: `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If the port can't be opened, a warning is printed and Johnny plays on without the web server.
 
-There is no authentication: anyone who can reach the port can change the settings, quit, or reboot and shut down the computer if stranded is allowed to (see below). Only use it on a network you trust.
+There is no authentication: anyone who can reach the port can change the settings, quit, switch Wi-Fi networks, or reboot and shut down the computer if stranded is allowed to (see below). Only use it on a network you trust.
 
 ### Night mode
 
@@ -143,6 +143,9 @@ Settings changed from the web page are saved in `~/.stranded`, next to the story
 | `POST /api/reboot`, `POST /api/shutdown` | Reboot or shut down the computer, with `systemctl reboot` or `systemctl poweroff` |
 | `GET /api/update` | Whether a newer release is available, eg. `{"installed": "2026.10.29", "latest": "2026.10.30", "updateAvailable": true, "updating": false}` |
 | `POST /api/update` | Download and install the latest release, in the background. stranded restarts once it's installed |
+| `GET /api/network` | The Wi-Fi and Ethernet connections, from NetworkManager, eg. `{"hostname": "stranded", "via": "wifi", "wifi": {"device": "wlan0", "state": "connected", "ssid": "Home", "signal": 72, "ip": "192.168.1.20"}, "ethernet": null, "wifiSwitch": null}`. `via` is the one the request came over; `wifiSwitch` is the last switch to another Wi-Fi network: `{"ssid", "state" (`switching`, `connected` or `failed`), "error", "secondsAgo"}` |
+| `GET /api/wifi/networks` | Scan for Wi-Fi networks, which takes a few seconds: `{"networks": [{"ssid": "Home", "signal": 72, "security": "WPA2", "inUse": true}, ...]}` |
+| `POST /api/wifi/connect` | Switch to another Wi-Fi network, in the background. Body: `{"ssid": "Home", "password": "..."}` (no password for an open network, or one NetworkManager already knows). If it can't join it, it goes back to the previous one |
 | `POST /api/sleep`, `POST /api/wake` | Turn the display off or on now, until the next scheduled switch |
 | `POST /api/auto` | Cancel a manual sleep or wake, and follow the night schedule |
 | `POST /api/reset-timer` | Reset the "stranded for" timer to zero |
@@ -163,9 +166,11 @@ Otherwise, these requests fail with a 500 error.
 
 Updating only works when stranded was installed with the Debian package. `GET /api/update` runs `/usr/lib/stranded/stranded-update check`, which asks GitHub for the latest release. `POST /api/update` starts `stranded-update.service`, which runs `stranded-update install` as root: it downloads the latest release's package and installs it with apt, which restarts stranded. The package's polkit rule lets the `stranded` user start that service, and only that one. Its output goes to `journalctl -u stranded-update`.
 
+Switching Wi-Fi networks runs `nmcli --ask device wifi connect <ssid>`, giving it the password on its standard input (so it's in no command line, URL or log). NetworkManager saves the new network, and the previous one stays saved. If it can't join the new one within 45 seconds (eg. the password is wrong), stranded removes the connection it made and brings the previous one back up. If the page reaches the Pi over Wi-Fi, it stops responding while the Pi is on the new network: open `http://<hostname>.local/` from a device on that network. Over Ethernet, the page keeps working. It needs NetworkManager's permission to scan, connect and add connections: the package's polkit rule gives it to the `stranded` user (`org.freedesktop.NetworkManager.wifi.scan`, `network-control` and `settings.modify.system`). NetworkManager's permissions don't say which connection, so that user can change any network connection.
+
 The status includes `runningTime`: how many seconds Johnny has been on screen in total, shown on the page as how long Johnny has been stranded. It doesn't count while night mode has the display off, nor while the program isn't running. It's saved with the settings once a minute, when quitting and when the display turns off or on, so it carries on across restarts. If the program is killed without quitting, up to a minute is lost.
 
-Every request except `quit`, `restart`, `reboot`, `shutdown` and `POST /api/update` (which return `{"ok": true}`) and `GET /api/update` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
+Every request except `quit`, `restart`, `reboot`, `shutdown`, `POST /api/update` and `POST /api/wifi/connect` (which return `{"ok": true}`), `GET /api/update`, `GET /api/network` and `GET /api/wifi/networks` returns the same JSON as `/api/status`; errors return a 4xx status with `{"error": "..."}`. For example:
 
     curl http://raspberrypi.local/api/status
     curl http://raspberrypi.local/api
