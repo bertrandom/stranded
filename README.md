@@ -1,5 +1,27 @@
 # Stranded
 
+```mermaid
+flowchart LR
+    stranded["<b>stranded</b><br>the C engine, as a Debian package"]
+    pi["<b>stranded-pi</b><br>an SD card image for the Raspberry Pi"]
+    web["<b>stranded-web</b><br>a TypeScript port for web pages"]
+    site["<b>stranded.bert.org</b><br>the landing page"]
+
+    stranded -- "Debian package" --> pi
+    stranded -- "ported to TypeScript" --> web
+    pi -- "image to download" --> site
+    web -- "Johnny playing live" --> site
+
+    click stranded href "https://github.com/bertrandom/stranded" _blank
+    click pi href "https://github.com/bertrandom/stranded-pi" _blank
+    click web href "https://github.com/bertrandom/stranded-web" _blank
+    click site href "https://github.com/bertrandom/stranded.bert.org" _blank
+
+    style stranded stroke-width:4px
+```
+
+[stranded](https://github.com/bertrandom/stranded) · [stranded-pi](https://github.com/bertrandom/stranded-pi) · [stranded-web](https://github.com/bertrandom/stranded-web) · [stranded.bert.org](https://github.com/bertrandom/stranded.bert.org)
+
 Stranded plays the classic Johnny Castaway screen saver, developed by Dynamix for Windows 3.x and published by Sierra back in 1992, full screen on Linux, for example on a Raspberry Pi. It adds a web page and an API to control it, a night mode that turns the display off, and widescreen support.
 
 It's a fork of [Johnny Reborn](https://github.com/jno6809/jc_reborn), Jeremie Guillaume's open source engine for the screen saver, written in C using the SDL2 library. For a ready-made Raspberry Pi SD card image, see [stranded-pi](https://github.com/bertrandom/stranded-pi).
