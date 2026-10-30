@@ -64,14 +64,14 @@
   .row label { flex: 1; }
   .hint { display: block; color: var(--muted); font-size: .85rem; }
   input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
-  input[type=time], input[type=password], select {
+  input[type=time], input[type=password], #wifiPassword, select {
     font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   }
   input[type=range] { width: 160px; accent-color: var(--accent); }
   .slider { display: flex; align-items: center; gap: 8px; }
   .slider output { min-width: 3.2em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-  input[type=password] { width: 200px; }
+  #wifiPassword { width: 200px; }
   #wifiNetworks { max-width: 260px; }
   .picker { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .times { display: flex; gap: 8px; align-items: center; }
@@ -204,6 +204,10 @@
       <div class="row" id="wifiPasswordRow">
         <label for="wifiPassword">Password<span class="hint">Can be left empty for a network stranded already knows</span></label>
         <input type="password" id="wifiPassword" autocomplete="off">
+      </div>
+      <div class="row" id="wifiShowPasswordRow">
+        <label for="wifiShowPassword">Show password</label>
+        <input type="checkbox" id="wifiShowPassword">
       </div>
       <div class="buttons" style="margin-top: 12px">
         <button class="primary" id="connectWifi">Connect</button>
@@ -564,13 +568,19 @@
 
   function showWifiPassword() {
     const chosen = wifiNetworks.find((n) => n.ssid === $('wifiNetworks').value);
-    $('wifiPasswordRow').hidden = !chosen || !chosen.security;
+    $('wifiPasswordRow').hidden = $('wifiShowPasswordRow').hidden = !chosen || !chosen.security;
     $('wifiPassword').value = '';
   }
   $('wifiNetworks').addEventListener('change', showWifiPassword);
 
+  $('wifiShowPassword').addEventListener('change', () => {
+    $('wifiPassword').type = $('wifiShowPassword').checked ? 'text' : 'password';
+  });
+
   function closeWifiPicker() {
     $('wifiPassword').value = '';
+    $('wifiPassword').type = 'password';
+    $('wifiShowPassword').checked = false;
     $('wifiPicker').hidden = true;
     $('scanWifi').hidden = false;
   }
