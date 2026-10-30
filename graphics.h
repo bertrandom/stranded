@@ -105,7 +105,7 @@ void grLoadBmp(struct TTtmSlot *ttmSlot, uint16 slotNo, char *strArg);
 void grReleaseBmp(struct TTtmSlot *ttmSlot, uint16 bmpSlotNo);
 
 void grSetClipZone(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2);
-void grCopyZoneToBg(SDL_Surface *sfc, uint16 arg0, uint16 arg1, uint16 arg2, uint16 arg3);
+void grCopyZoneToBg(SDL_Surface *sfc, sint16 x, sint16 y, uint16 width, uint16 height);
 void grSaveImage1(SDL_Surface *sfc, uint16 arg0, uint16 arg1, uint16 arg2, uint16 arg3);
 void grSaveZone(SDL_Surface *sfc, uint16 arg0, uint16 arg1, uint16 arg2, uint16 arg3);
 void grRestoreZone(SDL_Surface *sfc, uint16 arg0, uint16 arg1, uint16 arg2, uint16 arg3);

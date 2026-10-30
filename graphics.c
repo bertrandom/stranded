@@ -500,6 +500,26 @@ void grFreeLayer(SDL_Surface *sfc)
 }
 
 
+// In a widened scene, a zone reaching the edge of the 640x480 scene is
+// extended to the edge of the widened one. Eg. the tanker's hull in
+// GJVIS6.TTM, which is drawn as rectangles and fills the whole width of the
+// scene once the prow is gone, would otherwise end in the middle of the ocean
+static void grWidenZone(sint16 *x, uint16 *width)
+{
+    // Zones already in the margins, eg. the fade outs' strips, are left as is
+    if (!grWideScene || *x + *width <= 0 || *x >= SCREEN_WIDTH)
+        return;
+
+    if (*x <= 0) {
+        *width += *x + grMarginX;
+        *x = -grMarginX;
+    }
+
+    if (*x + *width >= SCREEN_WIDTH)
+        *width = SCREEN_WIDTH + grMarginX - *x;
+}
+
+
 void grSetClipZone(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2)
 {
     // In a widened scene, a zone reaching the edge of the 640x480 scene
@@ -518,10 +538,12 @@ void grSetClipZone(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2)
 }
 
 
-void grCopyZoneToBg(SDL_Surface *sfc, uint16 x, uint16 y, uint16 width, uint16 height)
+void grCopyZoneToBg(SDL_Surface *sfc, sint16 x, sint16 y, uint16 width, uint16 height)
 {
+    grWidenZone(&x, &width);
+
     x += grDx + grMarginX; y += grDy;
-    SDL_Rect rect = { (short) x, (short) y, width + 2, height };
+    SDL_Rect rect = { x, y, width + 2, height };
 
     if (grSavedZonesLayer == NULL)
         grSavedZonesLayer = grNewLayer();
@@ -628,6 +650,8 @@ void grDrawLine(SDL_Surface *sfc, sint16 x1, sint16 y1, sint16 x2, sint16 y2, ui
 
 void grDrawRect(SDL_Surface *sfc, sint16 x, sint16 y, uint16 width, uint16 height, uint8 color)
 {
+    grWidenZone(&x, &width);
+
     x += grDx + grMarginX; y += grDy;
 
     SDL_Rect dest = { x, y, width, height };
